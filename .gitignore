@@ -13,7 +13,10 @@ appsettings.*.local.json
 
 ## IDE
 .vs/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.DotSettings.user
 

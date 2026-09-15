@@ -115,6 +115,17 @@ dotnet ef database update \
 
 ## IV. Chạy ứng dụng
 
+### Cách chạy bằng VS Code (khuyến nghị)
+
+Mở đúng thư mục chứa `CustomerManager.sln` (`CustomerManager/CustomerManager`). VS Code sẽ đọc cấu hình trong `.vscode/`:
+
+1. Cài extension **C# Dev Kit** khi VS Code đề xuất, sau đó đợi solution tải xong.
+2. Nhấn `Ctrl+Shift+B` và chọn task `build` để restore và build solution.
+3. Nhấn `Ctrl+Shift+D`, chọn `API + Blazor (chạy song song)` rồi nhấn `F5`. API chạy tại `https://localhost:7050/swagger`, Blazor tại `http://localhost:5100`.
+4. Nhấn `Ctrl+Shift+P` → **Tasks: Run Task** để chạy `ef-migrations-add-InitialCreate`, `ef-database-update` hoặc `test`.
+
+Lần đầu cần cài `dotnet-ef` và hoàn tất User Secrets ở mục III trước khi chạy migration. Có thể đặt breakpoint trong Controller, Service và file `.razor` khi debug.
+
 ```bash
 # Terminal 1 — API (Swagger tự mở ở https://localhost:7050/swagger)
 dotnet run --project src/CustomerManager.WebApi
@@ -124,6 +135,13 @@ dotnet run --project src/CustomerManager.Blazor
 ```
 
 Đăng nhập bằng tài khoản đã set ở `AdminSeed:Username`/`AdminSeed:Password` bước III.3.
+
+### Lỗi thường gặp
+
+- **`dotnet` không nhận hoặc không có SDK:** cài .NET 8 SDK, mở lại VS Code và kiểm tra `dotnet --version` trả về `8.x`.
+- **Lỗi HTTPS certificate:** chạy `dotnet dev-certs https --trust`, sau đó khởi động lại API.
+- **Port đã được sử dụng:** đóng tiến trình đang dùng port `7050` hoặc `5100`, hoặc cập nhật đồng thời `launchSettings.json`, `.vscode/launch.json` và `Cors:AllowedOrigins`.
+- **IntelliSense không nhận project:** mở thư mục chứa `CustomerManager.sln`, cài **C# Dev Kit**, rồi chạy lệnh `C# Dev Kit: Restart Language Server` từ Command Palette.
 
 ## V. Chạy test
 

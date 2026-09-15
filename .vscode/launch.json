@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/CustomerManager.WebApi/bin/Debug/net8.0/CustomerManager.WebApi.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/CustomerManager.WebApi",
+      "stopAtEntry": false,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    },
+    {
+      "name": "Blazor",
+      "type": "blazorwasm",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/src/CustomerManager.Blazor",
+      "url": "http://localhost:5100"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "API + Blazor (chạy song song)",
+      "configurations": ["API", "Blazor"],
+      "stopAll": true
+    }
+  ]
+}
