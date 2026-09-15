@@ -98,18 +98,14 @@ void ConfigureOutputCache(Microsoft.AspNetCore.OutputCaching.OutputCacheOptions 
 }
 
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+builder.Services.AddOutputCache(ConfigureOutputCache);
 if (!string.IsNullOrWhiteSpace(redisConnectionString))
 {
     builder.Services.AddStackExchangeRedisOutputCache(options =>
     {
-        ConfigureOutputCache(options);
         options.Configuration = redisConnectionString;
         options.InstanceName = "CustomerManager:";
     });
-}
-else
-{
-    builder.Services.AddOutputCache(ConfigureOutputCache);
 }
 
 // ---------------------------------------------------------------------------

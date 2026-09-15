@@ -10,7 +10,7 @@ Toàn bộ source code trong repo này được viết trong một môi trườn
 - **Chưa build được**: `CustomerManager.Application`, `CustomerManager.Infrastructure`, `CustomerManager.WebApi`, `CustomerManager.Blazor`, `CustomerManager.UnitTests` — các project này cần EF Core, FluentValidation, MudBlazor, JWT Bearer... Code được viết cẩn thận, đúng API mà tôi biết ở thời điểm viết, nhưng **chưa được compiler xác nhận**. Việc đầu tiên bạn nên làm sau khi tải về là:
 
   ```bash
-  dotnet restore
+ dotnet restore 
   dotnet build
   ```
 
