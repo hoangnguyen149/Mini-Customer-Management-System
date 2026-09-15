@@ -163,6 +163,10 @@ dotnet test
 | Output Cache optional/pluggable Redis + invalidate theo tag | `WebApi/Program.cs` (`ConfigureOutputCache`, `EvictByTagAsync` trong `CustomersController`) |
 | JWT lưu in-memory ở Blazor, không localStorage | `Blazor/Services/TokenProvider.cs` |
 | Không AutoMapper | `Application/Mappings/CustomerMappingExtensions.cs` |
+| AuditLog riêng (Old/New JSON), tách khỏi soft-delete interceptor | `Infrastructure/Persistence/Interceptors/AuditLogInterceptor.cs` |
+| Refresh token: chỉ lưu SHA-256 hash trong DB, rotation mỗi lần refresh | `Application/Services/AuthService.cs` |
+| Account lockout sau N lần sai (mặc định 5 lần/15 phút, cấu hình qua `Security:*`) | `Domain/Entities/User.cs`, `Application/Services/AuthService.cs` |
+| Security response headers (CSP/X-Frame-Options/nosniff), ẩn `Server` header, HSTS khi không phải Development | `WebApi/Program.cs` |
 
 Toàn bộ phân tích đầy đủ (requirement, UI, ERD, API design, estimation, risk...) nằm ở `docs/System-Analysis-Phase1.md`.
 
@@ -171,6 +175,11 @@ Toàn bộ phân tích đầy đủ (requirement, UI, ERD, API design, estimatio
 - `CustomerManager.IntegrationTests` (đã đề cập trong thiết kế, chưa scaffold trong lần commit này) — nơi phù hợp để test hành vi phụ thuộc SQL Server thật: unique constraint trên `CustomerCode`/`Email`, ROWVERSION auto-generation.
 - CI (GitHub Actions) chạy `dotnet build` + `dotnet test` trên mỗi PR.
 - Export Excel/CSV, Entra ID, bảng `Users` mở rộng role — xem mục "Possible Improvements" trong tài liệu Phase 1.
+
+### Đánh đổi bảo mật có chủ đích (chưa làm, có lý do)
+
+- **Multi-user / RBAC (Admin/Staff/Viewer):** hệ thống vẫn giữ đúng thiết kế ban đầu — 1 tài khoản admin duy nhất, không có endpoint đăng ký (xem `AdminUserSeeder.cs`). Đây là quyết định giảm attack surface có chủ đích, không phải thiếu sót. Nếu cần nhiều người dùng/phân quyền thật, cần thiết kế lại bảng `Users` + `Roles` và áp dụng `[Authorize(Roles = ...)]` theo từng endpoint.
+- **Mã hoá SĐT/CCCD trong DB (AES field-level):** chưa triển khai. Lý do: `CustomerService.GetPagedAsync` hiện tìm kiếm theo số điện thoại bằng `PhoneNumber.Contains(...)` (dịch sang `LIKE '%...%'` ở SQL Server) — mã hoá AES chuẩn sẽ làm mất khả năng này (mỗi lần mã hoá cùng giá trị ra ciphertext khác nhau, hoặc nếu dùng mã hoá tất định thì chỉ tìm được chính xác, không tìm được theo chuỗi con). Hướng cải tiến trong tương lai nếu cần: mã hoá cột thật (EF Core Value Converter hoặc SQL Server Always Encrypted) + thêm cột "blind index" (hash tất định của số đã chuẩn hoá) để tìm kiếm exact-match, chấp nhận đánh đổi không tìm được theo số điện thoại một phần.
 
 ## VIII. Tài liệu & tài nguyên bổ sung
 
