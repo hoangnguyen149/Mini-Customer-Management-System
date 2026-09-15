@@ -1,0 +1,27 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+
+## Blazor WASM build output
+wwwroot/lib/
+
+## Secrets — never commit real values
+appsettings.*.local.json
+*.pfx
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Test results
+TestResults/
+coverage/
+*.trx
