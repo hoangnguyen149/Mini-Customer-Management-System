@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CustomerManager.WebApi</RootNamespace>
+    <UserSecretsId>3f6f2b6e-3f2a-4a6a-9b8d-customermanager-webapi</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.10" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <!-- Only used if ConnectionStrings:Redis is configured — see Program.cs and
+         Phase 1 design doc section 10 (Redis is optional/pluggable, not a hard
+         dependency for this Mini Project). -->
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CustomerManager.Application\CustomerManager.Application.csproj" />
+    <ProjectReference Include="..\CustomerManager.Infrastructure\CustomerManager.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
