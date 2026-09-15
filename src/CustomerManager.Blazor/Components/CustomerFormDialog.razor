@@ -1,0 +1,166 @@
+@inject ICustomerApiService CustomerApiService
+
+<MudDialog>
+    <DialogContent>
+        @if (_isLoading)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <MudForm @ref="_form" Model="_model">
+                <MudTextField T="string" Label="Họ và tên" @bind-Value="_model.FullName"
+                              Required="true" RequiredError="Họ và tên không được để trống." Class="mb-3" />
+
+                <MudTextField T="string" Label="Email" @bind-Value="_model.Email"
+                              Required="true" RequiredError="Email không được để trống."
+                              Validation="@(new Func<string, string?>(ValidateEmail))" Class="mb-3" />
+
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.PhoneNumber"
+                              Required="true" RequiredError="Số điện thoại không được để trống."
+                              Validation="@(new Func<string, string?>(ValidatePhoneNumber))" Class="mb-3" />
+
+                <MudDatePicker Label="Ngày sinh" @bind-Date="_model.DateOfBirth"
+                              Required="true" RequiredError="Vui lòng chọn ngày sinh." Class="mb-3" />
+
+                <MudSwitch T="bool" @bind-Value="_model.IsActive" Label="Đang hoạt động" Color="Color.Primary" />
+            </MudForm>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3">@_errorMessage</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SubmitAsync" Disabled="_isSubmitting || _isLoading">
+            Lưu
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>null = Create mode, non-null = Edit mode (loads the existing
+    /// customer, including its RowVersion for the optimistic-concurrency check
+    /// on save).</summary>
+    [Parameter] public Guid? CustomerId { get; set; }
+
+    private MudForm? _form;
+    private readonly CustomerFormModel _model = new();
+    private string? _rowVersion;
+    private bool _isLoading;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CustomerId is not { } id)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        try
+        {
+            var dto = await CustomerApiService.GetByIdAsync(id);
+            _model.FullName = dto.FullName;
+            _model.Email = dto.Email;
+            _model.PhoneNumber = dto.PhoneNumber;
+            _model.DateOfBirth = dto.DateOfBirth.ToDateTime(TimeOnly.MinValue);
+            _model.IsActive = dto.IsActive;
+            _rowVersion = dto.RowVersion;
+        }
+        catch (ApiException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_form is null)
+        {
+            return;
+        }
+
+        await _form.Validate();
+        if (!_form.IsValid)
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        try
+        {
+            var dateOfBirth = DateOnly.FromDateTime(_model.DateOfBirth ?? DateTime.Today);
+
+            if (CustomerId is { } id)
+            {
+                await CustomerApiService.UpdateAsync(id, new UpdateCustomerRequest
+                {
+                    FullName = _model.FullName,
+                    Email = _model.Email,
+                    PhoneNumber = _model.PhoneNumber,
+                    DateOfBirth = dateOfBirth,
+                    IsActive = _model.IsActive,
+                    RowVersion = _rowVersion ?? string.Empty
+                });
+            }
+            else
+            {
+                await CustomerApiService.CreateAsync(new CreateCustomerRequest
+                {
+                    FullName = _model.FullName,
+                    Email = _model.Email,
+                    PhoneNumber = _model.PhoneNumber,
+                    DateOfBirth = dateOfBirth,
+                    IsActive = _model.IsActive
+                });
+            }
+
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (ApiException ex)
+        {
+            // Surfaces server-side conflicts too (duplicate Email, stale
+            // RowVersion / concurrency conflict) — this is the client half of
+            // the "server-side validation is the last line of defense" rule.
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private static string? ValidateEmail(string? email) =>
+        string.IsNullOrWhiteSpace(email) ? null // Required handles empty
+        : !email.Contains('@') || !email.Contains('.') ? "Email không đúng định dạng."
+        : null;
+
+    private static string? ValidatePhoneNumber(string? phone) =>
+        string.IsNullOrWhiteSpace(phone) ? null // Required handles empty
+        : !System.Text.RegularExpressions.Regex.IsMatch(phone, @"^0\d{9}$")
+            ? "Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0."
+            : null;
+
+    private class CustomerFormModel
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string PhoneNumber { get; set; } = string.Empty;
+        public DateTime? DateOfBirth { get; set; } = DateTime.Today.AddYears(-18);
+        public bool IsActive { get; set; } = true;
+    }
+}

@@ -1,0 +1,62 @@
+@page "/login"
+@inject IAuthApiService AuthApiService
+@inject NavigationManager Navigation
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
+    <MudPaper Class="pa-8" Elevation="3">
+        <MudText Typo="Typo.h5" Class="mb-4">Đăng nhập quản trị</MudText>
+
+        <EditForm Model="_model" OnValidSubmit="SubmitAsync">
+            <DataAnnotationsValidator />
+
+            <MudTextField T="string" Label="Tên đăng nhập" @bind-Value="_model.Username"
+                          Required="true" RequiredError="Vui lòng nhập tên đăng nhập." Class="mb-4" />
+
+            <MudTextField T="string" Label="Mật khẩu" @bind-Value="_model.Password"
+                          InputType="InputType.Password" Required="true" RequiredError="Vui lòng nhập mật khẩu." Class="mb-4" />
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-4">@_errorMessage</MudAlert>
+            }
+
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                       FullWidth="true" Disabled="_isSubmitting">
+                @(_isSubmitting ? "Đang đăng nhập..." : "Đăng nhập")
+            </MudButton>
+        </EditForm>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private readonly LoginFormModel _model = new();
+    private string? _errorMessage;
+    private bool _isSubmitting;
+
+    [SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    private async Task SubmitAsync()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        var success = await AuthApiService.LoginAsync(_model.Username, _model.Password);
+
+        _isSubmitting = false;
+
+        if (!success)
+        {
+            _errorMessage = "Tên đăng nhập hoặc mật khẩu không đúng.";
+            return;
+        }
+
+        Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl);
+    }
+
+    private class LoginFormModel
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
