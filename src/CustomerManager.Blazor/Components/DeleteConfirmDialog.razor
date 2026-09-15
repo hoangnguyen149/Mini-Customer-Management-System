@@ -1,18 +1,21 @@
 <MudDialog>
     <DialogContent>
-        <MudText>
-            Bạn có chắc chắn muốn xóa khách hàng <strong>@CustomerFullName</strong> không?
-            Dữ liệu sẽ được lưu lại (xóa mềm) và không hiển thị trong danh sách.
-        </MudText>
+        <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Start">
+            <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Color="Color.Warning" Size="Size.Large" />
+            <MudText>
+                Bạn có chắc chắn muốn xóa khách hàng <strong>@CustomerFullName</strong> không?
+                Dữ liệu sẽ được lưu lại (xóa mềm) và không hiển thị trong danh sách.
+            </MudText>
+        </MudStack>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Hủy</MudButton>
-        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Confirm">Xóa</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Delete" OnClick="Confirm">Xóa</MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
-    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public string CustomerFullName { get; set; } = string.Empty;
 
     private void Confirm() => MudDialog.Close(DialogResult.Ok(true));

@@ -1,40 +1,85 @@
 @page "/login"
 @inject IAuthApiService AuthApiService
 @inject NavigationManager Navigation
+@inject IJSRuntime JsRuntime
+@inject ISnackbar Snackbar
 
-<MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
-    <MudPaper Class="pa-8" Elevation="3">
-        <MudText Typo="Typo.h5" Class="mb-4">Đăng nhập quản trị</MudText>
+<div class="login-page">
+    <MudPaper Class="login-card" Elevation="4">
+        <div class="login-brand-panel on-brand-panel d-none d-md-flex">
+            <MudStack AlignItems="AlignItems.Center" Spacing="1" Class="login-brand-content">
+                <MudText Typo="Typo.h4" Style="font-weight:700;">CEP</MudText>
+                <MudText Typo="Typo.body1" Class="mb-2" Style="opacity:.9;">Customer Management</MudText>
+                <CommunityVisual />
+            </MudStack>
+            <MudText Typo="Typo.caption" Style="letter-spacing:.5px; opacity:.95; font-weight:600;">
+                VÌ LỢI ÍCH CỘNG ĐỒNG
+            </MudText>
+        </div>
 
-        <EditForm Model="_model" OnValidSubmit="SubmitAsync">
-            <DataAnnotationsValidator />
+        <div class="login-form-panel">
+            <MudStack AlignItems="AlignItems.Center" Class="mb-4 d-md-none" Spacing="0">
+                <MudText Typo="Typo.h5" Color="Color.Primary" Style="font-weight:700;">CEP</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Customer Management</MudText>
+            </MudStack>
 
-            <MudTextField T="string" Label="Tên đăng nhập" @bind-Value="_model.Username"
-                          Required="true" RequiredError="Vui lòng nhập tên đăng nhập." Class="mb-4" />
+            <MudText Typo="Typo.h5" Class="mb-1">Đăng nhập quản trị</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-6">Hệ thống quản lý khách hàng CEP</MudText>
 
-            <MudTextField T="string" Label="Mật khẩu" @bind-Value="_model.Password"
-                          InputType="InputType.Password" Required="true" RequiredError="Vui lòng nhập mật khẩu." Class="mb-4" />
+            <EditForm Model="_model" OnValidSubmit="SubmitAsync">
+                <DataAnnotationsValidator />
 
-            @if (!string.IsNullOrEmpty(_errorMessage))
-            {
-                <MudAlert Severity="Severity.Error" Class="mb-4">@_errorMessage</MudAlert>
-            }
+                <MudTextField T="string" Label="Tên đăng nhập" @bind-Value="_model.Username" Variant="Variant.Outlined"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person"
+                              Required="true" RequiredError="Vui lòng nhập tên đăng nhập." Class="mb-4" />
 
-            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
-                       FullWidth="true" Disabled="_isSubmitting">
-                @(_isSubmitting ? "Đang đăng nhập..." : "Đăng nhập")
-            </MudButton>
-        </EditForm>
+                <MudTextField T="string" Label="Mật khẩu" @bind-Value="_model.Password" Variant="Variant.Outlined"
+                              InputType="@(_showPassword ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showPassword = !_showPassword)" AdornmentAriaLabel="Hiện/ẩn mật khẩu"
+                              Required="true" RequiredError="Vui lòng nhập mật khẩu." Class="mb-2" />
+
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+                    <MudCheckBox T="bool" @bind-Value="_rememberMe" Label="Ghi nhớ đăng nhập" Color="Color.Primary" Dense="true" />
+                    <MudLink Typo="Typo.body2" OnClick="ShowForgotPasswordInfo" Style="cursor:pointer;">Quên mật khẩu?</MudLink>
+                </MudStack>
+
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mb-4" Dense="true">@_errorMessage</MudAlert>
+                }
+
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.Login" FullWidth="true" Disabled="_isSubmitting">
+                    @(_isSubmitting ? "Đang đăng nhập..." : "Đăng nhập")
+                </MudButton>
+            </EditForm>
+        </div>
     </MudPaper>
-</MudContainer>
+</div>
 
 @code {
+    private const string RememberedUsernameKey = "customermanager-remembered-username";
+
     private readonly LoginFormModel _model = new();
     private string? _errorMessage;
     private bool _isSubmitting;
+    private bool _showPassword;
+    private bool _rememberMe;
 
     [SupplyParameterFromQuery]
     public string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var remembered = await JsRuntime.InvokeAsync<string?>("localStorage.getItem", RememberedUsernameKey);
+        if (!string.IsNullOrEmpty(remembered))
+        {
+            _model.Username = remembered;
+            _rememberMe = true;
+        }
+    }
 
     private async Task SubmitAsync()
     {
@@ -51,8 +96,22 @@
             return;
         }
 
+        // Only the username is ever persisted — the JWT itself stays in-memory-only
+        // (see TokenProvider), so "remember me" here never weakens that XSS defense.
+        if (_rememberMe)
+        {
+            await JsRuntime.InvokeVoidAsync("localStorage.setItem", RememberedUsernameKey, _model.Username);
+        }
+        else
+        {
+            await JsRuntime.InvokeVoidAsync("localStorage.removeItem", RememberedUsernameKey);
+        }
+
         Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl);
     }
+
+    private void ShowForgotPasswordInfo() =>
+        Snackbar.Add("Vui lòng liên hệ quản trị viên hệ thống để được đặt lại mật khẩu.", Severity.Info);
 
     private class LoginFormModel
     {

@@ -12,7 +12,15 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddMudServices();
 
 // Auth state: JWT lives only in TokenProvider (in-memory) — see its XML doc for why.
-builder.Services.AddScoped<TokenProvider>();
+// Singleton, not Scoped: IHttpClientFactory builds AuthorizationMessageHandler's
+// pipeline in its own internal DI scope (documented HttpClientFactory behavior),
+// separate from the app's normal @inject scope. A Scoped TokenProvider would
+// resolve to a second, never-populated instance inside that handler pipeline,
+// silently dropping the Authorization header from every request. Singleton
+// guarantees the handler and the rest of the app always share the same instance.
+builder.Services.AddSingleton<TokenProvider>();
+builder.Services.AddSingleton<ThemeService>();
+builder.Services.AddSingleton<CommandPaletteService>();
 builder.Services.AddScoped<CustomAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthStateProvider>());
 builder.Services.AddAuthorizationCore();

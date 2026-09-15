@@ -4,44 +4,59 @@
     <DialogContent>
         @if (_isLoading)
         {
-            <MudProgressCircular Indeterminate="true" />
+            <MudStack AlignItems="AlignItems.Center" Class="pa-8" Spacing="2">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Đang tải dữ liệu...</MudText>
+            </MudStack>
         }
         else
         {
             <MudForm @ref="_form" Model="_model">
-                <MudTextField T="string" Label="Họ và tên" @bind-Value="_model.FullName"
-                              Required="true" RequiredError="Họ và tên không được để trống." Class="mb-3" />
-
-                <MudTextField T="string" Label="Email" @bind-Value="_model.Email"
-                              Required="true" RequiredError="Email không được để trống."
-                              Validation="@(new Func<string, string?>(ValidateEmail))" Class="mb-3" />
-
-                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.PhoneNumber"
-                              Required="true" RequiredError="Số điện thoại không được để trống."
-                              Validation="@(new Func<string, string?>(ValidatePhoneNumber))" Class="mb-3" />
-
-                <MudDatePicker Label="Ngày sinh" @bind-Date="_model.DateOfBirth"
-                              Required="true" RequiredError="Vui lòng chọn ngày sinh." Class="mb-3" />
-
-                <MudSwitch T="bool" @bind-Value="_model.IsActive" Label="Đang hoạt động" Color="Color.Primary" />
+                <MudGrid>
+                    <MudItem xs="12">
+                        <MudTextField T="string" Label="Họ và tên" @bind-Value="_model.FullName" Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person"
+                                      Required="true" RequiredError="Họ và tên không được để trống." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Email" @bind-Value="_model.Email" Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Email"
+                                      Required="true" RequiredError="Email không được để trống."
+                                      Validation="@(new Func<string, string?>(ValidateEmail))" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.PhoneNumber" Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Phone"
+                                      Required="true" RequiredError="Số điện thoại không được để trống."
+                                      Validation="@(new Func<string, string?>(ValidatePhoneNumber))" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudDatePicker Label="Ngày sinh" @bind-Date="_model.DateOfBirth" Variant="Variant.Outlined"
+                                      Required="true" RequiredError="Vui lòng chọn ngày sinh." />
+                    </MudItem>
+                    <MudItem xs="12" sm="6" Class="d-flex align-center">
+                        <MudSwitch T="bool" @bind-Value="_model.IsActive" Label="Đang hoạt động" Color="Color.Primary" />
+                    </MudItem>
+                </MudGrid>
             </MudForm>
 
             @if (!string.IsNullOrEmpty(_errorMessage))
             {
-                <MudAlert Severity="Severity.Error" Class="mt-3">@_errorMessage</MudAlert>
+                <MudAlert Severity="Severity.Error" Class="mt-3" Dense="true">@_errorMessage</MudAlert>
             }
         }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Hủy</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SubmitAsync" Disabled="_isSubmitting || _isLoading">
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save"
+                  OnClick="SubmitAsync" Disabled="_isSubmitting || _isLoading">
             Lưu
         </MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
-    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
 
     /// <summary>null = Create mode, non-null = Edit mode (loads the existing
     /// customer, including its RowVersion for the optimistic-concurrency check

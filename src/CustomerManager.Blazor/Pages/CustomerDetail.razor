@@ -1,0 +1,134 @@
+@page "/customers/{Id:guid}"
+@attribute [Authorize]
+@inject ICustomerApiService CustomerApiService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@if (_isLoading)
+{
+    <MudStack AlignItems="AlignItems.Center" Class="pa-8" Spacing="2">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+    </MudStack>
+}
+else if (_loadError)
+{
+    <MudAlert Severity="Severity.Error" Dense="true">
+        Không thể tải thông tin khách hàng.
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ml-2" OnClick="LoadAsync">Thử lại</MudButton>
+    </MudAlert>
+}
+else if (_customer is not null)
+{
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Class="mb-4"
+              OnClick="@(() => Navigation.NavigateTo("/customers"))">
+        Quay lại danh sách
+    </MudButton>
+
+    <MudGrid>
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-6 d-flex flex-column align-center" Elevation="2">
+                <MudAvatar Color="@AvatarHelper.GetColor(_customer.FullName)" Style="width:96px;height:96px;font-size:2rem;" Class="mb-4">
+                    @AvatarHelper.GetInitials(_customer.FullName)
+                </MudAvatar>
+                <MudText Typo="Typo.h5" Class="text-center">@_customer.FullName</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">Mã KH: @_customer.CustomerCode</MudText>
+                <MudChip T="string" Color="@(_customer.IsActive ? Color.Success : Color.Default)" Variant="Variant.Filled">
+                    @(_customer.IsActive ? "Đang hoạt động" : "Ngừng hoạt động")
+                </MudChip>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit"
+                          Class="mt-4" FullWidth="true" OnClick="OpenEditDialogAsync">
+                    Chỉnh sửa
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="8">
+            <MudPaper Class="pa-6 mb-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">Thông tin liên hệ</MudText>
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Email</MudText>
+                        <MudText>@_customer.Email</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Số điện thoại</MudText>
+                        <MudText>@_customer.PhoneNumber</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Ngày sinh</MudText>
+                        <MudText>@_customer.DateOfBirth.ToString("dd/MM/yyyy")</MudText>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+
+            <MudPaper Class="pa-6" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">Thông tin hệ thống</MudText>
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Ngày tạo</MudText>
+                        <MudText>@_customer.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Người tạo</MudText>
+                        <MudText>@_customer.CreatedBy</MudText>
+                    </MudItem>
+                    @if (_customer.UpdatedAt is not null)
+                    {
+                        <MudItem xs="12" sm="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Cập nhật lần cuối</MudText>
+                            <MudText>@_customer.UpdatedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Người cập nhật</MudText>
+                            <MudText>@_customer.UpdatedBy</MudText>
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private CustomerDetailDto? _customer;
+    private bool _isLoading = true;
+    private bool _loadError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _loadError = false;
+        StateHasChanged();
+
+        try
+        {
+            _customer = await CustomerApiService.GetByIdAsync(Id);
+        }
+        catch (ApiException)
+        {
+            _loadError = true;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenEditDialogAsync()
+    {
+        var parameters = new DialogParameters<CustomerFormDialog> { { x => x.CustomerId, Id } };
+        var dialog = await DialogService.ShowAsync<CustomerFormDialog>("Cập nhật khách hàng", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Đã cập nhật khách hàng.", Severity.Success);
+            await LoadAsync();
+        }
+    }
+}

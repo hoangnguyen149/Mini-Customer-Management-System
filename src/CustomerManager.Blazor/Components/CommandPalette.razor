@@ -1,0 +1,145 @@
+@inject CommandPaletteService PaletteService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject IAuthApiService AuthApiService
+@inject ThemeService ThemeService
+@implements IDisposable
+
+@if (_isOpen)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="2000" OnClick="Close" Class="command-palette-overlay">
+        <MudPaper Class="command-palette pa-2" Elevation="10" @onclick:stopPropagation="true">
+            <MudTextField @ref="_inputRef" T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true"
+                          Placeholder="Tìm kiếm lệnh... (Esc để đóng)" Variant="Variant.Text" AutoFocus="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnKeyDown="HandleKeyDown" Class="px-2" />
+            <MudDivider Class="my-1" />
+            @if (_filtered.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4">Không có lệnh phù hợp.</MudText>
+            }
+            else
+            {
+                <MudList T="string" Dense="true" Class="command-palette-list">
+                    @for (var i = 0; i < _filtered.Count; i++)
+                    {
+                        var index = i;
+                        var command = _filtered[i];
+                        <MudListItem T="string" Icon="@command.Icon"
+                                    Class="@(index == _selectedIndex ? "command-palette-item-selected" : null)"
+                                    OnClick="@(() => ExecuteAsync(command))">
+                            @command.Label
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudOverlay>
+}
+
+@code {
+    private sealed record CommandItem(string Label, string Icon, Func<Task> Action);
+
+    private bool _isOpen;
+    private string _query = string.Empty;
+    private int _selectedIndex;
+    private MudTextField<string>? _inputRef;
+    private List<CommandItem> _commands = new();
+    private List<CommandItem> _filtered = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _commands = BuildCommands();
+        _filtered = _commands;
+
+        PaletteService.OnToggleRequested += HandleToggleRequested;
+        await PaletteService.EnsureRegisteredAsync();
+    }
+
+    private List<CommandItem> BuildCommands() => new()
+    {
+        new CommandItem("Dashboard", Icons.Material.Filled.Dashboard, () => NavigateAsync("/")),
+        new CommandItem("Khách hàng", Icons.Material.Filled.Groups, () => NavigateAsync("/customers")),
+        new CommandItem("Thêm khách hàng", Icons.Material.Filled.PersonAdd, OpenAddCustomerAsync),
+        new CommandItem("Đổi chế độ sáng/tối", Icons.Material.Filled.DarkMode, () => ThemeService.ToggleAsync()),
+        new CommandItem("Đăng xuất", Icons.Material.Filled.Logout, LogoutAsync),
+    };
+
+    private void HandleToggleRequested()
+    {
+        _isOpen = !_isOpen;
+        if (_isOpen)
+        {
+            _query = string.Empty;
+            _selectedIndex = 0;
+            _filtered = _commands;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnQueryChanged(string value)
+    {
+        _query = value;
+        _selectedIndex = 0;
+        _filtered = string.IsNullOrWhiteSpace(_query)
+            ? _commands
+            : _commands.Where(c => c.Label.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+            case "ArrowDown":
+                if (_filtered.Count > 0)
+                {
+                    _selectedIndex = (_selectedIndex + 1) % _filtered.Count;
+                }
+                break;
+            case "ArrowUp":
+                if (_filtered.Count > 0)
+                {
+                    _selectedIndex = (_selectedIndex - 1 + _filtered.Count) % _filtered.Count;
+                }
+                break;
+            case "Enter":
+                if (_selectedIndex >= 0 && _selectedIndex < _filtered.Count)
+                {
+                    await ExecuteAsync(_filtered[_selectedIndex]);
+                }
+                break;
+        }
+    }
+
+    private async Task ExecuteAsync(CommandItem command)
+    {
+        Close();
+        await command.Action();
+    }
+
+    private void Close() => _isOpen = false;
+
+    private Task NavigateAsync(string url)
+    {
+        Navigation.NavigateTo(url);
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenAddCustomerAsync()
+    {
+        Navigation.NavigateTo("/customers");
+        var parameters = new DialogParameters<CustomerFormDialog> { { x => x.CustomerId, null } };
+        await DialogService.ShowAsync<CustomerFormDialog>("Thêm khách hàng", parameters);
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthApiService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: false);
+    }
+
+    public void Dispose() => PaletteService.OnToggleRequested -= HandleToggleRequested;
+}

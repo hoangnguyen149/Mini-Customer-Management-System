@@ -1,0 +1,150 @@
+@page "/"
+@attribute [Authorize]
+@inject ICustomerApiService CustomerApiService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudGrid Class="mb-2">
+    <MudItem xs="12" md="8">
+        <MudStack Spacing="1" Justify="Justify.Center" Class="h-100">
+            <MudText Typo="Typo.h4">@Greeting, @(_userName ?? "Administrator")</MudText>
+            <MudText Typo="Typo.h5" Color="Color.Primary">CEP Customer Management</MudText>
+            <MudText Typo="Typo.body1" Color="Color.Secondary">
+                Quản lý thông tin khách hàng nhanh chóng, chính xác và an toàn.
+            </MudText>
+            <MudStack Row="true" Spacing="2" Class="mt-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Groups"
+                          OnClick="@(() => Navigation.NavigateTo("/customers"))">
+                    Xem khách hàng
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                          OnClick="OpenAddCustomerAsync">
+                    Thêm khách hàng
+                </MudButton>
+            </MudStack>
+        </MudStack>
+    </MudItem>
+    <MudItem xs="12" md="4" Class="d-none d-md-flex justify-center align-center">
+        <CommunityVisual />
+    </MudItem>
+</MudGrid>
+
+<MudGrid>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Icon="@Icons.Material.Filled.Groups" Label="Tổng khách hàng" Value="_totalCount" Loading="_isLoading" Color="Color.Primary" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Icon="@Icons.Material.Filled.CheckCircle" Label="Đang hoạt động" Value="_activeCount" Loading="_isLoading" Color="Color.Success" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Icon="@Icons.Material.Filled.Cancel" Label="Ngừng hoạt động" Value="_inactiveCount" Loading="_isLoading" Color="Color.Default" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <StatCard Icon="@Icons.Material.Filled.TrendingUp" Label="Tỷ lệ hoạt động" Value="_activeRate" Suffix="%" Loading="_isLoading" Color="Color.Info" />
+    </MudItem>
+</MudGrid>
+
+@if (_loadError)
+{
+    <MudAlert Severity="Severity.Error" Class="mt-6" Dense="true">
+        Không thể tải số liệu khách hàng. Máy chủ không phản hồi.
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ml-2" OnClick="LoadStatsAsync">Thử lại</MudButton>
+    </MudAlert>
+}
+
+@* Organization/brand information — deliberately separate from the customer
+   KPIs above. The only figure here ("35+ năm") is a verified public fact
+   (CEP founded 02/11/1991) from cep.org.vn, not data from this database. *@
+<MudPaper Class="pa-6 mt-6" Elevation="1" Style="border-left: 4px solid var(--mud-palette-primary);">
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Spacing="4">
+        <MudStack Spacing="1" Style="max-width: 560px;">
+            <MudText Typo="Typo.subtitle1" Color="Color.Primary" Style="font-weight:700;">Vì lợi ích cộng đồng</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                CEP là tổ chức tài chính vi mô đồng hành cùng công nhân và người lao động có thu nhập thấp
+                trong hơn 35 năm qua. Hệ thống này là công cụ nội bộ giúp CEP quản lý thông tin khách hàng
+                chính xác và an toàn hơn.
+            </MudText>
+        </MudStack>
+        <MudStack AlignItems="AlignItems.Center" Spacing="0">
+            <MudText Typo="Typo.h4" Color="Color.Primary">35+</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">năm đồng hành</MudText>
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    private int _totalCount;
+    private int _activeCount;
+    private int _inactiveCount;
+    private int _activeRate;
+    private bool _isLoading = true;
+    private bool _loadError;
+    private string? _userName;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private static string Greeting => DateTime.Now.Hour switch
+    {
+        < 12 => "Chào buổi sáng",
+        < 18 => "Chào buổi chiều",
+        _ => "Chào buổi tối"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is not null)
+        {
+            var state = await AuthenticationStateTask;
+            _userName = state.User.Identity?.Name;
+        }
+
+        await LoadStatsAsync();
+    }
+
+    /// <summary>Reads only TotalCount from three cheap PageSize=1 calls — no new
+    /// backend endpoint, no fetching/counting full customer data client-side.
+    /// "New this month" from the master prompt is deliberately omitted: the list
+    /// DTO doesn't expose CreatedAt, and faking it would violate "no fake data".</summary>
+    private async Task LoadStatsAsync()
+    {
+        _isLoading = true;
+        _loadError = false;
+        StateHasChanged();
+
+        try
+        {
+            var totalTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1 });
+            var activeTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1, IsActive = true });
+            var inactiveTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1, IsActive = false });
+
+            await Task.WhenAll(totalTask, activeTask, inactiveTask);
+
+            _totalCount = totalTask.Result.TotalCount;
+            _activeCount = activeTask.Result.TotalCount;
+            _inactiveCount = inactiveTask.Result.TotalCount;
+            _activeRate = _totalCount == 0 ? 0 : (int)Math.Round(_activeCount * 100.0 / _totalCount);
+        }
+        catch (ApiException)
+        {
+            _loadError = true;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OpenAddCustomerAsync()
+    {
+        var parameters = new DialogParameters<CustomerFormDialog> { { x => x.CustomerId, null } };
+        var dialog = await DialogService.ShowAsync<CustomerFormDialog>("Thêm khách hàng", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Đã thêm khách hàng.", Severity.Success);
+            Navigation.NavigateTo("/customers");
+        }
+    }
+}

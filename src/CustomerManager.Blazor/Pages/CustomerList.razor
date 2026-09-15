@@ -1,68 +1,196 @@
-@page "/"
+@page "/customers"
 @attribute [Authorize]
 @inject ICustomerApiService CustomerApiService
+@inject NavigationManager Navigation
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
-<MudText Typo="Typo.h5" Class="mb-4">Quản lý khách hàng</MudText>
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Groups" Color="Color.Primary" Size="Size.Large" />
+    <MudText Typo="Typo.h5">Quản lý khách hàng</MudText>
+</MudStack>
 
-<MudPaper Class="pa-4 mb-4" Elevation="0">
+<MudPaper Class="pa-4 mb-4" Elevation="1">
     <MudGrid>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="5">
             <MudTextField T="string" Label="Tìm theo họ tên" Value="_fullNameFilter" ValueChanged="OnFullNameFilterChanged"
-                          Immediate="true" DebounceInterval="400" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+                          Immediate="true" DebounceInterval="400" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
         </MudItem>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="5">
             <MudTextField T="string" Label="Tìm theo số điện thoại" Value="_phoneFilter" ValueChanged="OnPhoneFilterChanged"
-                          Immediate="true" DebounceInterval="400" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Phone" />
+                          Immediate="true" DebounceInterval="400" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Phone" />
         </MudItem>
-        <MudItem xs="12" sm="3">
-            <MudSelect T="bool?" Label="Trạng thái" Value="_activeFilter" ValueChanged="OnActiveFilterChanged">
-                <MudSelectItem T="bool?" Value="@((bool?)null)">Tất cả</MudSelectItem>
-                <MudSelectItem T="bool?" Value="@((bool?)true)">Đang hoạt động</MudSelectItem>
-                <MudSelectItem T="bool?" Value="@((bool?)false)">Ngừng hoạt động</MudSelectItem>
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="1" Class="d-flex align-center justify-end">
-            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
-                          OnClick="OpenCreateDialogAsync" title="Thêm khách hàng" />
+        <MudItem xs="12" sm="2" Class="d-flex align-center justify-end gap-2">
+            <MudTooltip Text="Bộ lọc">
+                <MudBadge Content="@(_activeFilter is null ? null : "1")" Color="Color.Primary" Overlap="true" Visible="_activeFilter is not null">
+                    <MudIconButton Icon="@Icons.Material.Filled.FilterList" OnClick="@(() => _filterDrawerOpen = true)" />
+                </MudBadge>
+            </MudTooltip>
+            <MudTooltip Text="Thêm khách hàng">
+                <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
+                              OnClick="OpenCreateDialogAsync" />
+            </MudTooltip>
         </MudItem>
     </MudGrid>
 </MudPaper>
 
-<MudDataGrid T="CustomerListItemDto" ServerData="ServerReloadFunc" @ref="_grid" Filterable="false" SortMode="SortMode.Multiple">
-    <Columns>
-        <PropertyColumn Property="x => x.CustomerCode" Title="Mã KH" />
-        <PropertyColumn Property="x => x.FullName" Title="Họ và tên" />
-        <PropertyColumn Property="x => x.Email" Title="Email" />
-        <PropertyColumn Property="x => x.PhoneNumber" Title="Số điện thoại" />
-        <PropertyColumn Property="x => x.DateOfBirth" Title="Ngày sinh" Format="dd/MM/yyyy" />
-        <TemplateColumn Title="Trạng thái" Sortable="false">
-            <CellTemplate>
-                <MudChip T="string" Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small">
-                    @(context.Item.IsActive ? "Hoạt động" : "Ngừng")
-                </MudChip>
-            </CellTemplate>
-        </TemplateColumn>
-        <TemplateColumn Title="" Sortable="false">
-            <CellTemplate>
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                              OnClick="@(() => OpenEditDialogAsync(context.Item.Id))" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                              OnClick="@(() => DeleteAsync(context.Item.Id, context.Item.FullName))" />
-            </CellTemplate>
-        </TemplateColumn>
-    </Columns>
-    <PagerContent>
-        <MudDataGridPager T="CustomerListItemDto" />
-    </PagerContent>
-</MudDataGrid>
+@if (_selectedItems.Count > 0)
+{
+    <MudPaper Class="pa-3 mb-4 d-flex align-center justify-space-between" Elevation="1">
+        <MudText Typo="Typo.body1">@_selectedItems.Count khách hàng đã chọn</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="BulkDeleteAsync">
+            Xóa
+        </MudButton>
+    </MudPaper>
+}
+
+<MudDrawer @bind-Open="_filterDrawerOpen" Anchor="Anchor.End" Elevation="2" Variant="DrawerVariant.Temporary" Width="320px">
+    <MudDrawerHeader>
+        <MudText Typo="Typo.h6">Bộ lọc</MudText>
+    </MudDrawerHeader>
+    <MudStack Class="pa-4" Spacing="4">
+        <MudSelect T="bool?" Label="Trạng thái" Value="_activeFilter" ValueChanged="OnActiveFilterChanged" Variant="Variant.Outlined">
+            <MudSelectItem T="bool?" Value="@((bool?)null)">Tất cả</MudSelectItem>
+            <MudSelectItem T="bool?" Value="@((bool?)true)">Đang hoạt động</MudSelectItem>
+            <MudSelectItem T="bool?" Value="@((bool?)false)">Ngừng hoạt động</MudSelectItem>
+        </MudSelect>
+        <MudStack Row="true" Justify="Justify.SpaceBetween">
+            <MudButton OnClick="ResetFiltersAsync">Đặt lại</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => _filterDrawerOpen = false)">Áp dụng</MudButton>
+        </MudStack>
+    </MudStack>
+</MudDrawer>
+
+<MudHidden Breakpoint="Breakpoint.SmAndDown">
+    <MudPaper Elevation="1" Class="pa-2">
+        <MudDataGrid T="CustomerListItemDto" ServerData="ServerReloadFunc" @ref="_grid" Filterable="false" SortMode="SortMode.Multiple"
+                    Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 340px)"
+                    RowsPerPage="10" Dense="false" MultiSelection="true" @bind-SelectedItems="_selectedItems">
+            <Columns>
+                <SelectColumn T="CustomerListItemDto" />
+                <PropertyColumn Property="x => x.CustomerCode" Title="Mã KH" />
+                <PropertyColumn Property="x => x.FullName" Title="Họ và tên" />
+                <PropertyColumn Property="x => x.Email" Title="Email" />
+                <PropertyColumn Property="x => x.PhoneNumber" Title="Số điện thoại" />
+                <PropertyColumn Property="x => x.DateOfBirth" Title="Ngày sinh" Format="dd/MM/yyyy" />
+                <TemplateColumn Title="Trạng thái" Sortable="false">
+                    <CellTemplate>
+                        <MudChip T="string" Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small" Variant="Variant.Filled">
+                            @(context.Item.IsActive ? "Hoạt động" : "Ngừng")
+                        </MudChip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="" Sortable="false" CellClass="d-flex justify-end">
+                    <CellTemplate>
+                        <MudTooltip Text="Xem chi tiết">
+                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                          OnClick="@(() => Navigation.NavigateTo($"/customers/{context.Item.Id}"))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Sửa">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                          OnClick="@(() => OpenEditDialogAsync(context.Item.Id))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Xóa">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                          OnClick="@(() => DeleteAsync(context.Item.Id, context.Item.FullName))" />
+                        </MudTooltip>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudStack AlignItems="AlignItems.Center" Class="pa-8" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Default" />
+                    <MudText Typo="Typo.body1" Color="Color.Secondary">Không tìm thấy khách hàng nào.</MudText>
+                </MudStack>
+            </NoRecordsContent>
+            <LoadingContent>
+                <MudStack AlignItems="AlignItems.Center" Class="pa-8" Spacing="2">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Đang tải dữ liệu...</MudText>
+                </MudStack>
+            </LoadingContent>
+            <PagerContent>
+                <MudDataGridPager T="CustomerListItemDto" />
+            </PagerContent>
+        </MudDataGrid>
+    </MudPaper>
+</MudHidden>
+
+<MudHidden Breakpoint="Breakpoint.MdAndUp">
+    <MudStack Spacing="2">
+        @if (_lastItems.Count == 0)
+        {
+            <MudPaper Class="pa-8" Elevation="1">
+                <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Default" />
+                    <MudText Typo="Typo.body1" Color="Color.Secondary">Không tìm thấy khách hàng nào.</MudText>
+                </MudStack>
+            </MudPaper>
+        }
+        @foreach (var item in _lastItems)
+        {
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Start">
+                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                        <MudAvatar Color="@AvatarHelper.GetColor(item.FullName)">@AvatarHelper.GetInitials(item.FullName)</MudAvatar>
+                        <MudStack Spacing="0">
+                            <MudText Typo="Typo.subtitle1">@item.FullName</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@item.CustomerCode</MudText>
+                        </MudStack>
+                    </MudStack>
+                    <MudChip T="string" Size="Size.Small" Color="@(item.IsActive ? Color.Success : Color.Default)" Variant="Variant.Filled">
+                        @(item.IsActive ? "Hoạt động" : "Ngừng")
+                    </MudChip>
+                </MudStack>
+                <MudStack Spacing="1" Class="mt-3">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <MudIcon Icon="@Icons.Material.Filled.Email" Size="Size.Small" Color="Color.Secondary" />
+                        <MudText Typo="Typo.body2">@item.Email</MudText>
+                    </MudStack>
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <MudIcon Icon="@Icons.Material.Filled.Phone" Size="Size.Small" Color="Color.Secondary" />
+                        <MudText Typo="Typo.body2">@item.PhoneNumber</MudText>
+                    </MudStack>
+                </MudStack>
+                <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                  OnClick="@(() => Navigation.NavigateTo($"/customers/{item.Id}"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                  OnClick="@(() => OpenEditDialogAsync(item.Id))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                  OnClick="@(() => DeleteAsync(item.Id, item.FullName))" />
+                </MudStack>
+            </MudPaper>
+        }
+        @if (_lastTotalPages > 1)
+        {
+            <MudStack Row="true" Justify="Justify.Center" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Disabled="_lastPage <= 1"
+                              OnClick="@(() => _grid?.NavigateTo(Page.Previous))" />
+                <MudText Typo="Typo.body2">Trang @_lastPage / @_lastTotalPages</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Disabled="_lastPage >= _lastTotalPages"
+                              OnClick="@(() => _grid?.NavigateTo(Page.Next))" />
+            </MudStack>
+        }
+    </MudStack>
+</MudHidden>
 
 @code {
     private MudDataGrid<CustomerListItemDto>? _grid;
     private string? _fullNameFilter;
     private string? _phoneFilter;
     private bool? _activeFilter;
+    private bool _filterDrawerOpen;
+    private HashSet<CustomerListItemDto> _selectedItems = new();
+
+    /// <summary>Mirrors what the (CSS-hidden-on-mobile) MudDataGrid last loaded,
+    /// so the mobile card list renders the exact same page without a second,
+    /// independent fetch.</summary>
+    private IReadOnlyList<CustomerListItemDto> _lastItems = Array.Empty<CustomerListItemDto>();
+    private int _lastPage = 1;
+    private int _lastTotalPages = 1;
 
     /// <summary>MudDataGrid's ServerData callback — every page/sort/filter change
     /// re-runs this, which calls the API (Skip/Take happens server-side, see
@@ -84,11 +212,15 @@
         try
         {
             var result = await CustomerApiService.GetPagedAsync(query);
+            _lastItems = result.Items;
+            _lastPage = result.PageNumber;
+            _lastTotalPages = Math.Max(1, result.TotalPages);
             return new GridData<CustomerListItemDto> { Items = result.Items, TotalItems = result.TotalCount };
         }
         catch (ApiException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
+            _lastItems = Array.Empty<CustomerListItemDto>();
             return new GridData<CustomerListItemDto> { Items = Array.Empty<CustomerListItemDto>(), TotalItems = 0 };
         }
     }
@@ -108,6 +240,12 @@
     private Task OnActiveFilterChanged(bool? value)
     {
         _activeFilter = value;
+        return ReloadGridAsync();
+    }
+
+    private Task ResetFiltersAsync()
+    {
+        _activeFilter = null;
         return ReloadGridAsync();
     }
 
@@ -160,5 +298,52 @@
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
+    }
+
+    /// <summary>Backend has no bulk-delete endpoint, so this loops the existing
+    /// single DeleteAsync — same soft-delete/audit path as a normal delete, just
+    /// repeated. Reports partial failure instead of silently swallowing it.</summary>
+    private async Task BulkDeleteAsync()
+    {
+        var count = _selectedItems.Count;
+        if (count == 0)
+        {
+            return;
+        }
+
+        var description = count == 1 ? _selectedItems.First().FullName : $"{count} khách hàng đã chọn";
+        var parameters = new DialogParameters<DeleteConfirmDialog> { { x => x.CustomerFullName, description } };
+        var dialog = await DialogService.ShowAsync<DeleteConfirmDialog>("Xác nhận xóa", parameters);
+        var result = await dialog.Result;
+
+        if (result is null || result.Canceled)
+        {
+            return;
+        }
+
+        var ids = _selectedItems.Select(x => x.Id).ToList();
+        var failures = 0;
+
+        foreach (var id in ids)
+        {
+            try
+            {
+                await CustomerApiService.DeleteAsync(id);
+            }
+            catch (ApiException)
+            {
+                failures++;
+            }
+        }
+
+        _selectedItems = new HashSet<CustomerListItemDto>();
+
+        Snackbar.Add(
+            failures == 0
+                ? $"Đã xóa {ids.Count} khách hàng."
+                : $"Đã xóa {ids.Count - failures}/{ids.Count} khách hàng. {failures} thất bại.",
+            failures == 0 ? Severity.Success : Severity.Warning);
+
+        await ReloadGridAsync();
     }
 }

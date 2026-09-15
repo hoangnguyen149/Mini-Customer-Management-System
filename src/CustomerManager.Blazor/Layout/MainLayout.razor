@@ -1,34 +1,120 @@
 @inherits LayoutComponentBase
+@using CustomerManager.Blazor.Theme
+@implements IDisposable
+@inject ThemeService ThemeService
+@inject CommandPaletteService CommandPaletteService
+@inject TokenProvider TokenProvider
 
-<MudThemeProvider />
+<MudThemeProvider Theme="AppTheme.Default" IsDarkMode="ThemeService.IsDarkMode" />
 <MudPopoverProvider />
-<MudDialogProvider />
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
 <MudSnackbarProvider />
 
-<MudLayout>
-    <AuthorizeView>
-        <Authorized>
-            <MudAppBar Elevation="1">
-                <MudText Typo="Typo.h6">CustomerManager</MudText>
+<AuthorizeView>
+    <Authorized>
+        <MudLayout>
+            <MudAppBar Elevation="2">
+                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                              OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+                <MudText Typo="Typo.h6" Class="ml-2">CustomerManager</MudText>
                 <MudSpacer />
-                <MudText Class="mr-4" Typo="Typo.body2">@context.User.Identity?.Name</MudText>
-                <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LogoutAsync">Đăng xuất</MudButton>
+                <MudTooltip Text="Tìm kiếm nhanh (Ctrl+K)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" OnClick="@(() => CommandPaletteService.Toggle())" />
+                </MudTooltip>
+                <MudTooltip Text="@(ThemeService.IsDarkMode ? "Chế độ sáng" : "Chế độ tối")">
+                    <MudIconButton Icon="@(ThemeService.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                                  Color="Color.Inherit" OnClick="@(() => ThemeService.ToggleAsync())" />
+                </MudTooltip>
+                @if (TokenProvider.HasValidToken)
+                {
+                    <MudChip T="string" Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Variant="Variant.Text" Size="Size.Small" Class="mx-1">
+                        Phiên an toàn
+                    </MudChip>
+                }
+                <MudChip T="string" Icon="@Icons.Material.Filled.Person" Color="Color.Default" Variant="Variant.Text" Class="mx-2">
+                    @context.User.Identity?.Name
+                </MudChip>
+                <MudButton Variant="Variant.Text" Color="Color.Inherit" StartIcon="@Icons.Material.Filled.Logout" OnClick="LogoutAsync">
+                    Đăng xuất
+                </MudButton>
             </MudAppBar>
-        </Authorized>
-    </AuthorizeView>
 
-    <MudMainContent Class="pa-4">
+            <MudDrawer @bind-Open="_drawerOpen" Elevation="1" Variant="DrawerVariant.Responsive" ClipMode="DrawerClipMode.Always">
+                <MudDrawerHeader>
+                    <MudStack Spacing="0">
+                        <MudText Typo="Typo.h6">CEP</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Customer Management</MudText>
+                    </MudStack>
+                </MudDrawerHeader>
+                <div class="d-flex flex-column" style="height: calc(100% - 64px);">
+                    <MudNavMenu>
+                        <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                        <MudNavLink Href="/customers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Khách hàng</MudNavLink>
+                    </MudNavMenu>
+                    <MudSpacer />
+                    <MudStack Class="pa-4" Spacing="1">
+                        <MudDivider Class="mb-2" />
+                        <MudText Typo="Typo.caption" Color="Color.Primary" Style="font-weight:700; letter-spacing:.5px;">
+                            VÌ LỢI ÍCH CỘNG ĐỒNG
+                        </MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">35+ năm đồng hành cùng cộng đồng</MudText>
+                    </MudStack>
+                </div>
+            </MudDrawer>
+
+            <MudMainContent>
+                <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4 d-flex flex-column" Style="min-height: calc(100vh - 64px);">
+                    <div @key="_currentUri" class="page-fade flex-grow-1">
+                        @Body
+                    </div>
+
+                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="cep-footer pt-6 pb-2">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">CEP Customer Management — Vì lợi ích cộng đồng</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">© 2026 CEP</MudText>
+                    </MudStack>
+                </MudContainer>
+            </MudMainContent>
+
+            <CommandPalette />
+        </MudLayout>
+    </Authorized>
+    <NotAuthorized>
         @Body
-    </MudMainContent>
-</MudLayout>
+    </NotAuthorized>
+</AuthorizeView>
 
 @code {
     [Inject] private IAuthApiService AuthApiService { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
 
+    private bool _drawerOpen = true;
+    private string _currentUri = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUri = Navigation.Uri;
+        Navigation.LocationChanged += HandleLocationChanged;
+        ThemeService.OnChange += HandleThemeChanged;
+        await ThemeService.InitializeAsync();
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _currentUri = e.Location;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleThemeChanged() => InvokeAsync(StateHasChanged);
+
     private async Task LogoutAsync()
     {
         await AuthApiService.LogoutAsync();
         Navigation.NavigateTo("/login", forceLoad: false);
+    }
+
+    public void Dispose()
+    {
+        ThemeService.OnChange -= HandleThemeChanged;
+        Navigation.LocationChanged -= HandleLocationChanged;
     }
 }
