@@ -1,0 +1,164 @@
+@page "/"
+@attribute [Authorize]
+@inject ICustomerApiService CustomerApiService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudText Typo="Typo.h5" Class="mb-4">Quản lý khách hàng</MudText>
+
+<MudPaper Class="pa-4 mb-4" Elevation="0">
+    <MudGrid>
+        <MudItem xs="12" sm="4">
+            <MudTextField T="string" Label="Tìm theo họ tên" Value="_fullNameFilter" ValueChanged="OnFullNameFilterChanged"
+                          Immediate="true" DebounceInterval="400" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudTextField T="string" Label="Tìm theo số điện thoại" Value="_phoneFilter" ValueChanged="OnPhoneFilterChanged"
+                          Immediate="true" DebounceInterval="400" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Phone" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="bool?" Label="Trạng thái" Value="_activeFilter" ValueChanged="OnActiveFilterChanged">
+                <MudSelectItem T="bool?" Value="@((bool?)null)">Tất cả</MudSelectItem>
+                <MudSelectItem T="bool?" Value="@((bool?)true)">Đang hoạt động</MudSelectItem>
+                <MudSelectItem T="bool?" Value="@((bool?)false)">Ngừng hoạt động</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="1" Class="d-flex align-center justify-end">
+            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
+                          OnClick="OpenCreateDialogAsync" title="Thêm khách hàng" />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudDataGrid T="CustomerListItemDto" ServerData="ServerReloadFunc" @ref="_grid" Filterable="false" SortMode="SortMode.Multiple">
+    <Columns>
+        <PropertyColumn Property="x => x.CustomerCode" Title="Mã KH" />
+        <PropertyColumn Property="x => x.FullName" Title="Họ và tên" />
+        <PropertyColumn Property="x => x.Email" Title="Email" />
+        <PropertyColumn Property="x => x.PhoneNumber" Title="Số điện thoại" />
+        <PropertyColumn Property="x => x.DateOfBirth" Title="Ngày sinh" Format="dd/MM/yyyy" />
+        <TemplateColumn Title="Trạng thái" Sortable="false">
+            <CellTemplate>
+                <MudChip T="string" Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small">
+                    @(context.Item.IsActive ? "Hoạt động" : "Ngừng")
+                </MudChip>
+            </CellTemplate>
+        </TemplateColumn>
+        <TemplateColumn Title="" Sortable="false">
+            <CellTemplate>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                              OnClick="@(() => OpenEditDialogAsync(context.Item.Id))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                              OnClick="@(() => DeleteAsync(context.Item.Id, context.Item.FullName))" />
+            </CellTemplate>
+        </TemplateColumn>
+    </Columns>
+    <PagerContent>
+        <MudDataGridPager T="CustomerListItemDto" />
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private MudDataGrid<CustomerListItemDto>? _grid;
+    private string? _fullNameFilter;
+    private string? _phoneFilter;
+    private bool? _activeFilter;
+
+    /// <summary>MudDataGrid's ServerData callback — every page/sort/filter change
+    /// re-runs this, which calls the API (Skip/Take happens server-side, see
+    /// CustomerService.GetPagedAsync). The grid never holds more than one page
+    /// of rows client-side.</summary>
+    private async Task<GridData<CustomerListItemDto>> ServerReloadFunc(GridState<CustomerListItemDto> state)
+    {
+        var query = new CustomerQueryParameters
+        {
+            FullName = _fullNameFilter,
+            PhoneNumber = _phoneFilter,
+            IsActive = _activeFilter,
+            PageNumber = state.Page + 1,
+            PageSize = state.PageSize,
+            SortBy = state.SortDefinitions.FirstOrDefault()?.SortBy,
+            SortDirection = state.SortDefinitions.FirstOrDefault()?.Descending == true ? "desc" : "asc"
+        };
+
+        try
+        {
+            var result = await CustomerApiService.GetPagedAsync(query);
+            return new GridData<CustomerListItemDto> { Items = result.Items, TotalItems = result.TotalCount };
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            return new GridData<CustomerListItemDto> { Items = Array.Empty<CustomerListItemDto>(), TotalItems = 0 };
+        }
+    }
+
+    private Task OnFullNameFilterChanged(string value)
+    {
+        _fullNameFilter = value;
+        return ReloadGridAsync();
+    }
+
+    private Task OnPhoneFilterChanged(string value)
+    {
+        _phoneFilter = value;
+        return ReloadGridAsync();
+    }
+
+    private Task OnActiveFilterChanged(bool? value)
+    {
+        _activeFilter = value;
+        return ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.ReloadServerData() ?? Task.CompletedTask;
+
+    private async Task OpenCreateDialogAsync()
+    {
+        var parameters = new DialogParameters<CustomerFormDialog> { { x => x.CustomerId, null } };
+        var dialog = await DialogService.ShowAsync<CustomerFormDialog>("Thêm khách hàng", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Đã thêm khách hàng.", Severity.Success);
+            await ReloadGridAsync();
+        }
+    }
+
+    private async Task OpenEditDialogAsync(Guid id)
+    {
+        var parameters = new DialogParameters<CustomerFormDialog> { { x => x.CustomerId, id } };
+        var dialog = await DialogService.ShowAsync<CustomerFormDialog>("Cập nhật khách hàng", parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            Snackbar.Add("Đã cập nhật khách hàng.", Severity.Success);
+            await ReloadGridAsync();
+        }
+    }
+
+    private async Task DeleteAsync(Guid id, string fullName)
+    {
+        var parameters = new DialogParameters<DeleteConfirmDialog> { { x => x.CustomerFullName, fullName } };
+        var dialog = await DialogService.ShowAsync<DeleteConfirmDialog>("Xác nhận xóa", parameters);
+        var result = await dialog.Result;
+
+        if (result is null || result.Canceled)
+        {
+            return;
+        }
+
+        try
+        {
+            await CustomerApiService.DeleteAsync(id);
+            Snackbar.Add("Đã xóa khách hàng.", Severity.Success);
+            await ReloadGridAsync();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

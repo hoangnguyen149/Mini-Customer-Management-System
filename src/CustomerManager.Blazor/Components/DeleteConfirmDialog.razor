@@ -1,0 +1,20 @@
+<MudDialog>
+    <DialogContent>
+        <MudText>
+            Bạn có chắc chắn muốn xóa khách hàng <strong>@CustomerFullName</strong> không?
+            Dữ liệu sẽ được lưu lại (xóa mềm) và không hiển thị trong danh sách.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Confirm">Xóa</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CustomerFullName { get; set; } = string.Empty;
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(true));
+    private void Cancel() => MudDialog.Cancel();
+}
