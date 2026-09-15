@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CustomerManager.Contracts</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Deliberately zero PackageReferences. This project is the shared DTO/contract
+    boundary between CustomerManager.WebApi and CustomerManager.Blazor (WASM).
+    Application/Infrastructure could reference EF Core etc.; Blazor cannot afford
+    to pull that into its client-side bundle, so DTOs live here instead of in
+    Application, and Blazor references only this project + Contracts.
+  -->
+
+</Project>
