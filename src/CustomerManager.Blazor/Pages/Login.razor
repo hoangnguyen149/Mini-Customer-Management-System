@@ -86,13 +86,13 @@
         _isSubmitting = true;
         _errorMessage = null;
 
-        var success = await AuthApiService.LoginAsync(_model.Username, _model.Password);
+        var errorMessage = await AuthApiService.LoginAsync(_model.Username, _model.Password);
 
         _isSubmitting = false;
 
-        if (!success)
+        if (errorMessage is not null)
         {
-            _errorMessage = "Tên đăng nhập hoặc mật khẩu không đúng.";
+            _errorMessage = errorMessage;
             return;
         }
 

@@ -21,5 +21,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.PasswordHash).IsRequired();
 
         builder.Property(x => x.CreatedAt).IsRequired();
+
+        builder.Property(x => x.FailedLoginAttempts).HasDefaultValue(0);
     }
 }

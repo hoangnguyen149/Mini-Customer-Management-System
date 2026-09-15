@@ -14,6 +14,14 @@ public class User
     public string PasswordHash { get; private set; } = string.Empty;
     public DateTime CreatedAt { get; private set; }
 
+    /// <summary>Consecutive failed login attempts since the last success. Reset
+    /// to 0 on a successful login. Drives account lockout — see RecordFailedLogin.</summary>
+    public int FailedLoginAttempts { get; private set; }
+
+    /// <summary>Set once FailedLoginAttempts crosses the configured threshold;
+    /// null when the account isn't currently locked out.</summary>
+    public DateTime? LockedOutUntil { get; private set; }
+
     private User()
     {
     }
@@ -27,5 +35,25 @@ public class User
             PasswordHash = passwordHash,
             CreatedAt = DateTime.UtcNow
         };
+    }
+
+    public bool IsLockedOut(DateTime now) => LockedOutUntil is not null && LockedOutUntil > now;
+
+    /// <summary>Called on every wrong-password attempt (never on unknown
+    /// username — there's no User row to update in that case). Locks the
+    /// account once <paramref name="maxAttempts"/> is reached.</summary>
+    public void RecordFailedLogin(int maxAttempts, TimeSpan lockoutDuration, DateTime now)
+    {
+        FailedLoginAttempts++;
+        if (FailedLoginAttempts >= maxAttempts)
+        {
+            LockedOutUntil = now.Add(lockoutDuration);
+        }
+    }
+
+    public void RecordSuccessfulLogin()
+    {
+        FailedLoginAttempts = 0;
+        LockedOutUntil = null;
     }
 }
