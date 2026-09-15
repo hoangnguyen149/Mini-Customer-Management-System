@@ -21,6 +21,17 @@ Toàn bộ source code trong repo này được viết trong một môi trườn
 - .NET 8 SDK
 - SQL Server (LocalDB, Developer Edition, hoặc Docker `mcr.microsoft.com/mssql/server`)
 - (Tùy chọn) Redis — chỉ cần nếu bạn muốn Output Cache dùng Redis thay vì in-memory mặc định
+- (Tùy chọn) [Postman](https://www.postman.com/) — để import `postman/CustomerManager.postman_collection.json` và gọi thử API mà không cần UI
+
+### Không có SQL Server cài sẵn? Chạy bằng Docker (khuyến nghị, nhanh nhất)
+
+```bash
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=YourStrong!Passw0rd" \
+  -p 1433:1433 --name customermanager-sql \
+  -d mcr.microsoft.com/mssql/server:2022-latest
+```
+
+Kiểm tra container đã chạy: `docker ps` — nếu container không lên (crash/restart loop), thường là do mật khẩu SA chưa đủ mạnh (tối thiểu 8 ký tự, có chữ hoa/thường/số/ký tự đặc biệt). Connection string tương ứng ở bước III.1 bên dưới sẽ dùng `Server=localhost,1433;...;User Id=sa;Password=YourStrong!Passw0rd`.
 
 ## II. Cấu trúc solution
 
@@ -45,11 +56,26 @@ Vì sao không có Repository generic hay AutoMapper — xem `CustomerManager.Ap
 
 ### 1. Connection string
 
+Dùng **User Secrets** (không commit connection string/mật khẩu vào `appsettings.json` — xem lý do bảo mật trong `docs/PHAN-TICH-VA-KE-HOACH.docx`, mục Security Design).
+
 ```bash
 cd src/CustomerManager.WebApi
 dotnet user-secrets init
+```
+
+Nếu dùng **LocalDB** (Windows, kèm theo Visual Studio):
+
+```bash
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=CustomerManagerDb;Trusted_Connection=True;TrustServerCertificate=True"
 ```
+
+Nếu dùng **Docker** (bước ở mục I, khuyến nghị cho macOS/Linux hoặc CI):
+
+```bash
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=CustomerManagerDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True"
+```
+
+Nếu dùng **SQL Server Developer Edition** cài đặt đầy đủ trên máy: thay `Server=` bằng tên instance của bạn (thường là `Server=localhost\\SQLEXPRESS;...` hoặc `Server=.;...`).
 
 ### 2. JWT secret (bắt buộc — API sẽ throw ngay khi start nếu thiếu, xem `Program.cs`)
 
@@ -127,3 +153,19 @@ Toàn bộ phân tích đầy đủ (requirement, UI, ERD, API design, estimatio
 - `CustomerManager.IntegrationTests` (đã đề cập trong thiết kế, chưa scaffold trong lần commit này) — nơi phù hợp để test hành vi phụ thuộc SQL Server thật: unique constraint trên `CustomerCode`/`Email`, ROWVERSION auto-generation.
 - CI (GitHub Actions) chạy `dotnet build` + `dotnet test` trên mỗi PR.
 - Export Excel/CSV, Entra ID, bảng `Users` mở rộng role — xem mục "Possible Improvements" trong tài liệu Phase 1.
+
+## VIII. Tài liệu & tài nguyên bổ sung
+
+| Tài liệu | Vị trí | Mô tả |
+|---|---|---|
+| Phân tích & Thiết kế đầy đủ (Markdown) | `docs/System-Analysis-Phase1.md` | Toàn bộ Phase 1: requirement, UI, ERD, API design, security, estimation, risk (v3) |
+| Phân tích chức năng/UI/DB (Word) | `docs/PHAN-TICH-VA-KE-HOACH.docx` | Bản rút gọn theo đúng 3 mục yêu cầu: chức năng & UI, thiết kế DB, tóm tắt estimation — dùng để nộp/trình bày |
+| Bảng ước lượng thời gian (Excel) | `docs/Estimation-WBS.xlsx` | WBS chi tiết theo giờ cho từng hạng mục công việc, có công thức tổng |
+| Postman Collection | `postman/CustomerManager.postman_collection.json` | Import vào Postman để gọi thử toàn bộ API (login, CRUD customers) kèm ví dụ response |
+| Kịch bản quay demo | `docs/Demo-Script.md` | Các bước cụ thể để tự quay video demo tính năng, đúng thứ tự nên trình bày |
+
+### Import Postman Collection
+
+1. Mở Postman → **Import** → chọn `postman/CustomerManager.postman_collection.json`.
+2. Tạo Environment mới với 2 biến: `baseUrl` (ví dụ `https://localhost:7050`) và `token` (để trống — request "Login" sẽ tự động set biến này qua Postman test script sau khi đăng nhập thành công).
+3. Chạy request **Auth → Login** trước tiên, sau đó mọi request Customers khác sẽ tự động đính kèm `Authorization: Bearer {{token}}`.
