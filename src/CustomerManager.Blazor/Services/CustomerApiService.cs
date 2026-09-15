@@ -48,6 +48,13 @@ public class CustomerApiService : ICustomerApiService
         await EnsureSuccessAsync(response);
     }
 
+    public async Task<IReadOnlyList<AuditLogDto>> GetAuditLogsAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _httpClient.GetAsync($"api/customers/{id}/audit-logs", ct);
+        await EnsureSuccessAsync(response);
+        return (await response.Content.ReadFromJsonAsync<List<AuditLogDto>>(cancellationToken: ct))!;
+    }
+
     private static string BuildQueryString(CustomerQueryParameters query)
     {
         var parameters = new List<string>

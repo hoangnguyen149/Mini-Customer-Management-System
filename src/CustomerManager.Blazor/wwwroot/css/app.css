@@ -239,6 +239,17 @@ body::before {
     opacity: 0.75;
 }
 
+/* Audit log diff view (CustomerDetail) — readable JSON, not a giant one-liner. */
+.audit-json {
+    background: var(--mud-palette-background-gray, rgba(128, 128, 128, 0.08));
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
+
 /* Community visual rendered on a colored brand panel (Login page) needs light
    strokes/fills instead of the primary/secondary colors it uses elsewhere,
    otherwise it disappears into a same-hue background. */

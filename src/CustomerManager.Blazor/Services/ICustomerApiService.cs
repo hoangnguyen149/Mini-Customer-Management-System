@@ -10,4 +10,5 @@ public interface ICustomerApiService
     Task<CustomerDetailDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct = default);
     Task<CustomerDetailDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<AuditLogDto>> GetAuditLogsAsync(Guid id, CancellationToken ct = default);
 }

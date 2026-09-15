@@ -1,5 +1,6 @@
 @page "/customers/{Id:guid}"
 @attribute [Authorize]
+@using System.Text.Json
 @inject ICustomerApiService CustomerApiService
 @inject NavigationManager Navigation
 @inject IDialogService DialogService
@@ -86,6 +87,42 @@ else if (_customer is not null)
                     }
                 </MudGrid>
             </MudPaper>
+
+            <MudPaper Class="pa-6 mt-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">Lịch sử thay đổi</MudText>
+
+                @if (_isLoadingAuditLogs)
+                {
+                    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="120px" />
+                }
+                else if (_auditLogs.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa có lịch sử thay đổi.</MudText>
+                }
+                else
+                {
+                    <MudExpansionPanels Elevation="0">
+                        @foreach (var log in _auditLogs)
+                        {
+                            <MudExpansionPanel Text="@($"{TranslateAction(log.Action)} — {log.UserName} — {log.Timestamp.ToLocalTime():dd/MM/yyyy HH:mm:ss}")">
+                                <MudGrid>
+                                    @if (!string.IsNullOrEmpty(log.OldValues))
+                                    {
+                                        <MudItem xs="12" sm="6">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">Giá trị cũ</MudText>
+                                            <pre class="audit-json">@FormatJson(log.OldValues)</pre>
+                                        </MudItem>
+                                    }
+                                    <MudItem xs="12" sm="6">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Giá trị mới</MudText>
+                                        <pre class="audit-json">@FormatJson(log.NewValues)</pre>
+                                    </MudItem>
+                                </MudGrid>
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+                }
+            </MudPaper>
         </MudItem>
     </MudGrid>
 }
@@ -96,8 +133,14 @@ else if (_customer is not null)
     private CustomerDetailDto? _customer;
     private bool _isLoading = true;
     private bool _loadError;
+    private List<AuditLogDto> _auditLogs = new();
+    private bool _isLoadingAuditLogs = true;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await LoadAuditLogsAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -116,6 +159,49 @@ else if (_customer is not null)
         finally
         {
             _isLoading = false;
+        }
+    }
+
+    private async Task LoadAuditLogsAsync()
+    {
+        _isLoadingAuditLogs = true;
+        try
+        {
+            _auditLogs = (await CustomerApiService.GetAuditLogsAsync(Id)).ToList();
+        }
+        catch (ApiException)
+        {
+            _auditLogs = new List<AuditLogDto>();
+        }
+        finally
+        {
+            _isLoadingAuditLogs = false;
+        }
+    }
+
+    private static string TranslateAction(string action) => action switch
+    {
+        "Added" => "Tạo mới",
+        "Modified" => "Cập nhật",
+        "Deleted" => "Xóa",
+        _ => action
+    };
+
+    private static string FormatJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return json;
         }
     }
 

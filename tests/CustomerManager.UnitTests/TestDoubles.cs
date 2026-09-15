@@ -50,9 +50,12 @@ internal static class TestDbContextFactory
 {
     public static AppDbContext Create(string? currentUsername = "test-admin")
     {
+        var currentUserService = new FakeCurrentUserService(currentUsername);
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .AddInterceptors(new SoftDeleteAndAuditInterceptor(new FakeCurrentUserService(currentUsername)))
+            .AddInterceptors(
+                new SoftDeleteAndAuditInterceptor(currentUserService),
+                new AuditLogInterceptor(currentUserService))
             .Options;
 
         return new AppDbContext(options);
