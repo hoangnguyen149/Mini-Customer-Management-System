@@ -16,10 +16,11 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
 
-        // Scoped (not Singleton): the interceptor depends on ICurrentUserService,
-        // which reads the current HttpContext.User — it must be resolved from the
-        // same DI scope as the request/DbContext, not once for the app lifetime.
+        // Scoped (not Singleton): both interceptors depend on ICurrentUserService,
+        // which reads the current HttpContext.User — they must be resolved from
+        // the same DI scope as the request/DbContext, not once for the app lifetime.
         services.AddScoped<SoftDeleteAndAuditInterceptor>();
+        services.AddScoped<AuditLogInterceptor>();
 
         services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
@@ -27,7 +28,13 @@ public static class DependencyInjection
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 
             options.UseSqlServer(connectionString);
-            options.AddInterceptors(serviceProvider.GetRequiredService<SoftDeleteAndAuditInterceptor>());
+
+            // Order matters: SoftDeleteAndAuditInterceptor must run first so it
+            // rewrites Deleted -> Modified+IsDeleted=true before AuditLogInterceptor
+            // inspects ChangeTracker state (see AuditLogInterceptor's XML doc).
+            options.AddInterceptors(
+                serviceProvider.GetRequiredService<SoftDeleteAndAuditInterceptor>(),
+                serviceProvider.GetRequiredService<AuditLogInterceptor>());
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());

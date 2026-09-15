@@ -175,6 +175,23 @@ public class CustomerService : ICustomerService
         await _context.SaveChangesAsync(ct);
     }
 
+    public async Task<IReadOnlyList<AuditLogDto>> GetAuditLogsAsync(Guid id, CancellationToken ct)
+    {
+        return await _context.AuditLogs
+            .AsNoTracking()
+            .Where(a => a.EntityName == nameof(Customer) && a.EntityId == id.ToString())
+            .OrderByDescending(a => a.Timestamp)
+            .Select(a => new AuditLogDto
+            {
+                Action = a.Action,
+                OldValues = a.OldValues,
+                NewValues = a.NewValues,
+                UserName = a.UserName,
+                Timestamp = a.Timestamp
+            })
+            .ToListAsync(ct);
+    }
+
     private async Task<string> GenerateNextCustomerCodeAsync(CancellationToken ct)
     {
         const string prefix = "KH-";

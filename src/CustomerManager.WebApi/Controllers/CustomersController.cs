@@ -50,6 +50,13 @@ public class CustomersController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpGet("{id:guid}/audit-logs")]
+    public async Task<ActionResult<IReadOnlyList<AuditLogDto>>> GetAuditLogs(Guid id, CancellationToken ct)
+    {
+        var result = await _customerService.GetAuditLogsAsync(id, ct);
+        return Ok(result);
+    }
+
     [HttpPost]
     public async Task<ActionResult<CustomerDetailDto>> Create([FromBody] CreateCustomerRequest request, CancellationToken ct)
     {
