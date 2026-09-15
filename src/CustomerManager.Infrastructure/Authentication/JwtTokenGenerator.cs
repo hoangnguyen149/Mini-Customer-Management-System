@@ -34,7 +34,10 @@ public class JwtTokenGenerator : IJwtTokenGenerator
 
         var issuer = jwtSection["Issuer"] ?? "CustomerManager";
         var audience = jwtSection["Audience"] ?? "CustomerManager.Client";
-        var expiryMinutes = int.TryParse(jwtSection["ExpiryMinutes"], out var minutes) ? minutes : 60;
+        // Short-lived by design (10-15 min default) — the refresh token (see
+        // AuthService) is what keeps a session alive, not a long-lived JWT that
+        // can't be revoked before it expires on its own.
+        var expiryMinutes = int.TryParse(jwtSection["ExpiryMinutes"], out var minutes) ? minutes : 15;
 
         var claims = new[]
         {

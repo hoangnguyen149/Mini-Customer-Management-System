@@ -21,8 +21,16 @@ builder.Services.AddMudServices();
 builder.Services.AddSingleton<TokenProvider>();
 builder.Services.AddSingleton<ThemeService>();
 builder.Services.AddSingleton<CommandPaletteService>();
-builder.Services.AddScoped<CustomAuthStateProvider>();
-builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthStateProvider>());
+
+// Singleton (not Scoped): SilentRefreshScheduler is a Singleton that needs to
+// call NotifyAuthenticationStateChanged() when a background token refresh
+// fails — a Singleton can't safely depend on a Scoped service (same class of
+// bug as the AuthorizationMessageHandler/TokenProvider issue above). WASM has
+// exactly one real scope for the app's lifetime anyway, so this changes
+// nothing observable, it just makes the DI graph consistent.
+builder.Services.AddSingleton<CustomAuthStateProvider>();
+builder.Services.AddSingleton<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthStateProvider>());
+builder.Services.AddSingleton<SilentRefreshScheduler>();
 builder.Services.AddAuthorizationCore();
 
 builder.Services.AddTransient<AuthorizationMessageHandler>();

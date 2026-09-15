@@ -10,6 +10,10 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Don't announce "Kestrel" to every caller — a minor bit of stack-fingerprinting
+// hardening (OWASP: don't leak technology details in headers).
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
 // ---------------------------------------------------------------------------
 // Application + Infrastructure (Services, FluentValidation, EF Core, JWT, seeder)
 // ---------------------------------------------------------------------------
@@ -116,8 +120,8 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorClient", policy => policy
         .WithOrigins(allowedOrigins)
-        .AllowAnyHeader()
-        .AllowAnyMethod());
+        .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+        .WithHeaders("Content-Type", "Authorization"));
 });
 
 // ---------------------------------------------------------------------------
@@ -146,6 +150,12 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(180);
+    options.IncludeSubDomains = true;
+});
+
 var app = builder.Build();
 
 app.UseExceptionHandler(); // delegates to GlobalExceptionHandler for every environment — no leaked stack traces even in dev.
@@ -155,8 +165,40 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+else
+{
+    // HSTS only makes sense once you're actually terminating HTTPS in front of
+    // this app (a real cert) — forcing it in local dev would just break http
+    // debugging against localhost.
+    app.UseHsts();
+}
 
 app.UseHttpsRedirection();
+
+// ---------------------------------------------------------------------------
+// Security response headers — defense-in-depth against clickjacking, MIME
+// sniffing, and (for the handful of HTML responses this API ever serves, e.g.
+// Swagger in dev) inline-script injection. This is a JSON API with no
+// user-rendered HTML of its own, so the CSP is deliberately locked down to
+// "nothing" rather than trying to allowlist a UI it doesn't have.
+// ---------------------------------------------------------------------------
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers.Remove("X-Powered-By");
+
+    // Skipped in Development: Swagger UI (dev-only, see above) needs to run its
+    // own inline scripts/styles, which a locked-down CSP would block.
+    if (!app.Environment.IsDevelopment())
+    {
+        headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
+    }
+
+    await next();
+});
 
 app.UseCors("BlazorClient");
 
