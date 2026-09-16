@@ -31,6 +31,16 @@ internal class FakeJwtTokenGenerator : IJwtTokenGenerator
         ($"fake-jwt-for-{user.Username}", DateTime.UtcNow.AddHours(1));
 }
 
+/// <summary>In-memory stand-in for SqlSequenceCustomerCodeGenerator — hands out
+/// "KH-0001", "KH-0002", ... in call order, without needing a real SQL Server
+/// sequence (SqlQueryRaw isn't supported by the InMemory provider).</summary>
+internal class FakeCustomerCodeGenerator : ICustomerCodeGenerator
+{
+    private int _next = 1;
+
+    public Task<string> NextAsync(CancellationToken ct) => Task.FromResult($"KH-{_next++:D4}");
+}
+
 /// <summary>
 /// Builds a real AppDbContext against the EF Core InMemory provider, with the
 /// same SoftDeleteAndAuditInterceptor production uses wired in — this is what
@@ -38,13 +48,14 @@ internal class FakeJwtTokenGenerator : IJwtTokenGenerator
 /// and the .csproj comment above).
 ///
 /// Known limitation: the InMemory provider does not reproduce SQL Server's
-/// ROWVERSION auto-generation/unique-index-violation behavior exactly, so
-/// CreateAsync's retry-on-DbUpdateException path for a colliding CustomerCode is
-/// not exercised here — that scenario belongs in a SQL Server/SQLite-backed
-/// integration test (CustomerManager.IntegrationTests, not built out in this
-/// pass). The RowVersion-mismatch test below sets RowVersion directly via its
-/// internal setter (see Customer.cs) instead of relying on provider-generated
-/// values, which IS reliable across providers.
+/// ROWVERSION auto-generation/unique-index-violation behavior exactly — that
+/// scenario belongs in a SQL Server/SQLite-backed integration test
+/// (CustomerManager.IntegrationTests, not built out in this pass). The
+/// RowVersion-mismatch test below sets RowVersion directly via its internal
+/// setter (see Customer.cs) instead of relying on provider-generated values,
+/// which IS reliable across providers. CustomerCode generation is likewise not
+/// provider-backed here — see FakeCustomerCodeGenerator, which replaces
+/// SqlSequenceCustomerCodeGenerator (SqlQueryRaw isn't supported by InMemory).
 /// </summary>
 internal static class TestDbContextFactory
 {

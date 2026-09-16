@@ -20,7 +20,7 @@ public class AuditLogInterceptorTests
     public async Task CreateAsync_ShouldWriteAddedAuditLog()
     {
         await using var context = TestDbContextFactory.Create("creator");
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
         var logs = await sut.GetAuditLogsAsync(created.Id, CancellationToken.None);
@@ -36,7 +36,7 @@ public class AuditLogInterceptorTests
     public async Task UpdateAsync_ShouldWriteModifiedAuditLog_WithOnlyChangedFields()
     {
         await using var context = TestDbContextFactory.Create("editor");
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         await sut.UpdateAsync(created.Id, new UpdateCustomerRequest
@@ -68,7 +68,7 @@ public class AuditLogInterceptorTests
         // that would silently regress into a confusing "Modified" entry if
         // interceptor registration order (SoftDelete before AuditLog) broke.
         await using var context = TestDbContextFactory.Create("deleter");
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         await sut.DeleteAsync(created.Id, CancellationToken.None);
@@ -81,7 +81,7 @@ public class AuditLogInterceptorTests
     public async Task GetAuditLogsAsync_ShouldReturnNewestFirst()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         await sut.UpdateAsync(created.Id, new UpdateCustomerRequest

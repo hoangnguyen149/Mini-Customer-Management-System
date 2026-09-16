@@ -21,7 +21,7 @@ public class CustomerServiceTests
     public async Task CreateAsync_ShouldReturnCustomerWithGeneratedCode_WhenRequestIsValid()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
         var result = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -36,7 +36,7 @@ public class CustomerServiceTests
     public async Task CreateAsync_ShouldGenerateSequentialCustomerCode_ForSecondCustomer()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
         await sut.CreateAsync(ValidCreateRequest("first@example.com"), CancellationToken.None);
         var second = await sut.CreateAsync(ValidCreateRequest("second@example.com"), CancellationToken.None);
@@ -48,7 +48,7 @@ public class CustomerServiceTests
     public async Task CreateAsync_ShouldThrowConflict_WhenEmailAlreadyExists()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         await sut.CreateAsync(ValidCreateRequest("duplicate@example.com"), CancellationToken.None);
 
         var act = () => sut.CreateAsync(ValidCreateRequest("duplicate@example.com"), CancellationToken.None);
@@ -60,7 +60,7 @@ public class CustomerServiceTests
     public async Task GetByIdAsync_ShouldReturnCustomer_WhenExists()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         var result = await sut.GetByIdAsync(created.Id, CancellationToken.None);
@@ -73,7 +73,7 @@ public class CustomerServiceTests
     public async Task GetByIdAsync_ShouldReturnNull_WhenNotExists()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
         var result = await sut.GetByIdAsync(Guid.NewGuid(), CancellationToken.None);
 
@@ -86,7 +86,7 @@ public class CustomerServiceTests
         // Proves the Global Query Filter (HasQueryFilter in AppDbContext) is
         // actually wired up — not just that DeleteAsync ran without throwing.
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         await sut.DeleteAsync(created.Id, CancellationToken.None);
@@ -99,7 +99,7 @@ public class CustomerServiceTests
     public async Task DeleteAsync_ShouldThrowNotFound_WhenCustomerDoesNotExist()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
         var act = () => sut.DeleteAsync(Guid.NewGuid(), CancellationToken.None);
 
@@ -110,7 +110,7 @@ public class CustomerServiceTests
     public async Task UpdateAsync_ShouldUpdateDetails_WhenRowVersionMatches()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         var result = await sut.UpdateAsync(created.Id, new UpdateCustomerRequest
@@ -131,7 +131,7 @@ public class CustomerServiceTests
     public async Task UpdateAsync_ShouldThrowConflict_WhenRowVersionIsStale()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         // Deliberately wrong RowVersion — simulates another admin having saved a
@@ -156,7 +156,7 @@ public class CustomerServiceTests
     public async Task GetPagedAsync_ShouldReturnFilteredResult_WhenFullNameProvided()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = new CustomerService(context);
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         await sut.CreateAsync(ValidCreateRequest("a1@example.com"), CancellationToken.None); // Nguyễn Văn A
         await sut.CreateAsync(new CreateCustomerRequest
         {

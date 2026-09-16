@@ -1,29 +1,38 @@
 # CustomerManager — Mini Customer Management System
 
-ASP.NET Core 8 Web API + Blazor WebAssembly + SQL Server/EF Core 8 (Code First), theo thiết kế trong `docs/System-Analysis-Phase1.md` (Phase 1 Analysis & Design, v3).
+Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ngân hàng: **ASP.NET Core 8 Web API** + **Blazor WebAssembly (MudBlazor)** + **SQL Server / EF Core 8 Code First**. Thiết kế chi tiết nằm trong `docs/System-Analysis-Phase1.md` (v4 — đã đồng bộ với code).
 
-## ⚠️ Tình trạng build — đọc trước khi mở project
+## Tình trạng dự án
 
-Toàn bộ source code trong repo này được viết trong một môi trường sandbox **không có quyền truy cập NuGet** (chính sách egress của tổ chức chặn `nuget.org`). Vì vậy:
+- Toàn bộ solution **build thành công**, đã có sẵn **3 EF Core migration** và đã smoke-test end-to-end với SQL Server thật (login / refresh / logout / CRUD / audit log / rate limit / security headers).
+- **34/34 unit test pass** (`dotnet test`).
+- Đã hoàn thành đầy đủ tính năng bắt buộc và cả 3 hạng mục Bonus của đề bài (MudBlazor, JWT, Git).
 
-- **Đã build & verify thật** (biên dịch thành công, 0 lỗi): `CustomerManager.Domain`, `CustomerManager.Contracts` — hai project này không có package ngoài nào.
-- **Chưa build được**: `CustomerManager.Application`, `CustomerManager.Infrastructure`, `CustomerManager.WebApi`, `CustomerManager.Blazor`, `CustomerManager.UnitTests` — các project này cần EF Core, FluentValidation, MudBlazor, JWT Bearer... Code được viết cẩn thận, đúng API mà tôi biết ở thời điểm viết, nhưng **chưa được compiler xác nhận**. Việc đầu tiên bạn nên làm sau khi tải về là:
+## Tính năng
 
-  ```bash
- dotnet restore 
-  dotnet build
-  ```
+**Bắt buộc**
 
-  Nếu có lỗi biên dịch (sai tên package, version không tồn tại, API signature lệch phiên bản...), đó nhiều khả năng là do tôi không có compiler để tự sửa trong lúc viết — hãy paste lỗi lại, tôi sẽ sửa ngay.
+- CRUD khách hàng: danh sách, thêm mới (Mã KH tự sinh `KH-0001`), cập nhật, xoá (soft delete).
+- Tìm kiếm theo Họ và tên / Số điện thoại, lọc theo trạng thái hoạt động, phân trang + sắp xếp server-side.
+- Validation (FluentValidation phía server + validate trên form): Email đúng định dạng và không trùng, SĐT bắt buộc và gồm 10 số bắt đầu bằng 0, ngày sinh hợp lệ.
+
+**Bonus & mở rộng**
+
+- **MudBlazor:** `MudDataGrid` server-side, dialog Thêm/Sửa/Xoá, Dashboard KPI, trang chi tiết khách hàng, Filter Drawer, xoá hàng loạt, card view trên mobile, dark mode, Command Palette (`Ctrl+K`).
+- **Xác thực JWT:** 1 tài khoản admin seed từ User Secrets; access token 15 phút + refresh token 7 ngày (xoay vòng, DB chỉ lưu SHA-256 hash), tự làm mới phiên ở Blazor; khoá tài khoản 15 phút sau 5 lần đăng nhập sai; rate limit 5 request/phút/IP cho login/refresh.
+- **Truy vết:** `CreatedBy/UpdatedBy` trên khách hàng + bảng `AuditLogs` lưu toàn bộ lịch sử thay đổi (giá trị cũ/mới dạng JSON), xem được trên UI.
+- **An toàn dữ liệu:** optimistic concurrency bằng `ROWVERSION` (409 khi 2 người cùng sửa), ProblemDetails (RFC 7807), security headers, HSTS, CORS whitelist, Output Cache có invalidate theo tag.
+- **Git:** GitFlow (`main` / `develop` / `feature/*` / `test/*`) + Conventional Commits.
 
 ## I. Yêu cầu môi trường
 
 - .NET 8 SDK
 - SQL Server (LocalDB, Developer Edition, hoặc Docker `mcr.microsoft.com/mssql/server`)
-- (Tùy chọn) Redis — chỉ cần nếu bạn muốn Output Cache dùng Redis thay vì in-memory mặc định
-- (Tùy chọn) [Postman](https://www.postman.com/) — để import `postman/CustomerManager.postman_collection.json` và gọi thử API mà không cần UI
+- Công cụ `dotnet-ef`: `dotnet tool install --global dotnet-ef`
+- (Tuỳ chọn) Redis — chỉ cần nếu muốn Output Cache dùng Redis thay vì in-memory mặc định
+- (Tuỳ chọn) [Postman](https://www.postman.com/) — import `postman/CustomerManager.postman_collection.json` để gọi thử API
 
-### Không có SQL Server cài sẵn? Chạy bằng Docker (khuyến nghị, nhanh nhất)
+### Không có SQL Server cài sẵn? Chạy bằng Docker
 
 ```bash
 docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=YourStrong!Passw0rd" \
@@ -31,168 +40,231 @@ docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=YourStrong!Passw0rd" \
   -d mcr.microsoft.com/mssql/server:2022-latest
 ```
 
-Kiểm tra container đã chạy: `docker ps` — nếu container không lên (crash/restart loop), thường là do mật khẩu SA chưa đủ mạnh (tối thiểu 8 ký tự, có chữ hoa/thường/số/ký tự đặc biệt). Connection string tương ứng ở bước III.1 bên dưới sẽ dùng `Server=localhost,1433;...;User Id=sa;Password=YourStrong!Passw0rd`.
+Kiểm tra bằng `docker ps` — nếu container không lên (crash/restart loop), thường do mật khẩu SA chưa đủ mạnh (tối thiểu 8 ký tự, có chữ hoa/thường/số/ký tự đặc biệt).
 
 ## II. Cấu trúc solution
 
 ```
 CustomerManager.sln
 src/
-├── CustomerManager.Domain          # Entities thuần C#, không phụ thuộc gì
-├── CustomerManager.Contracts       # DTO dùng chung giữa WebApi và Blazor (không kéo EF Core vào bundle WASM)
-├── CustomerManager.Application     # Services, FluentValidation, IApplicationDbContext (thay Repository)
-├── CustomerManager.Infrastructure  # EF Core DbContext, Interceptor (soft delete + audit), JWT, seeder
-├── CustomerManager.WebApi          # Controllers, Program.cs, ProblemDetails, rate limiting, output cache
-└── CustomerManager.Blazor          # Blazor WebAssembly + MudBlazor
+├── CustomerManager.Domain          # Entities: Customer, User, AuditLog, RefreshToken (không phụ thuộc gì)
+├── CustomerManager.Contracts       # DTO dùng chung WebApi ↔ Blazor (0 package, không kéo EF Core vào bundle WASM)
+├── CustomerManager.Application     # CustomerService, AuthService, FluentValidation, IApplicationDbContext (thay Repository)
+├── CustomerManager.Infrastructure  # AppDbContext, Configurations, Interceptors (soft delete, audit log), Migrations, JWT, AdminUserSeeder
+├── CustomerManager.WebApi          # AuthController, CustomersController, GlobalExceptionHandler, Program.cs
+└── CustomerManager.Blazor          # Blazor WebAssembly + MudBlazor (Pages, Components, Services, Theme)
 tests/
 └── CustomerManager.UnitTests       # xUnit + FluentAssertions + EF Core InMemory
-docs/
-└── System-Analysis-Phase1.md       # Toàn bộ tài liệu phân tích/thiết kế (Phase 1, v3)
+docs/                               # Tài liệu phân tích, ước lượng, kịch bản demo
+postman/                            # Postman Collection
+.vscode/                            # Cấu hình F5 debug + tasks cho VS Code
 ```
 
-Vì sao không có Repository generic hay AutoMapper — xem `CustomerManager.Application/Interfaces/IApplicationDbContext.cs` và `CustomerManager.Application/Mappings/CustomerMappingExtensions.cs` (comment giải thích trade-off ngay trong code).
+Vì sao không có Repository generic hay AutoMapper — xem comment trong `CustomerManager.Application/Interfaces/IApplicationDbContext.cs` và `CustomerManager.Application/Mappings/CustomerMappingExtensions.cs`.
 
 ## III. Thiết lập lần đầu
 
-### 1. Connection string
-
-Dùng **User Secrets** (không commit connection string/mật khẩu vào `appsettings.json` — xem lý do bảo mật trong `docs/PHAN-TICH-VA-KE-HOACH.docx`, mục Security Design).
+Mọi secret dùng **User Secrets** (dev) hoặc biến môi trường (prod). `appsettings.json` cố ý để trống connection string, `Jwt:Secret` và `AdminSeed`.
 
 ```bash
 cd src/CustomerManager.WebApi
 dotnet user-secrets init
 ```
 
-Nếu dùng **LocalDB** (Windows, kèm theo Visual Studio):
+### 1. Connection string
+
+**LocalDB** (Windows, kèm Visual Studio):
 
 ```bash
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=CustomerManagerDb;Trusted_Connection=True;TrustServerCertificate=True"
 ```
 
-Nếu dùng **Docker** (bước ở mục I, khuyến nghị cho macOS/Linux hoặc CI):
+**Docker** (khuyến nghị cho macOS/Linux):
 
 ```bash
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=CustomerManagerDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True"
 ```
 
-Nếu dùng **SQL Server Developer Edition** cài đặt đầy đủ trên máy: thay `Server=` bằng tên instance của bạn (thường là `Server=localhost\\SQLEXPRESS;...` hoặc `Server=.;...`).
+**SQL Server Developer/Express** cài trên máy: thay `Server=` bằng tên instance (thường là `Server=localhost\\SQLEXPRESS;...` hoặc `Server=.;...`).
 
-### 2. JWT secret (bắt buộc — API sẽ throw ngay khi start nếu thiếu, xem `Program.cs`)
+### 2. JWT secret (bắt buộc — API dừng ngay khi start nếu thiếu hoặc ngắn hơn 32 ký tự)
 
 ```bash
 dotnet user-secrets set "Jwt:Secret" "$(openssl rand -base64 48)"
 ```
 
-### 3. Tài khoản admin seed (bắt buộc để đăng nhập được — xem `AdminUserSeeder.cs`)
+### 3. Tài khoản admin (bắt buộc để đăng nhập)
 
 ```bash
 dotnet user-secrets set "AdminSeed:Username" "admin"
-dotnet user-secrets set "AdminSeed:Password" "<mật khẩu bạn chọn, đủ mạnh>"
+dotnet user-secrets set "AdminSeed:Password" "<mật khẩu đủ mạnh>"
 ```
 
-Nếu bỏ qua bước này, API vẫn chạy nhưng sẽ log warning "no admin user was seeded" và không ai đăng nhập được — chạy `dotnet user-secrets set` rồi restart API để seed.
+`AdminUserSeeder` tạo tài khoản khi API khởi động nếu bảng `Users` còn trống. Nếu bỏ qua bước này, API vẫn chạy nhưng log warning "no admin user was seeded" — set lại rồi restart API.
 
-### 4. Tạo migration đầu tiên (chưa có sẵn migration nào trong repo — xem lý do bên dưới)
+### 4. Tạo database từ migration có sẵn
+
+Repo đã có sẵn 3 migration trong `src/CustomerManager.Infrastructure/Persistence/Migrations`:
+
+| Migration | Nội dung |
+|---|---|
+| `InitialCreate` | Bảng `Users`, `Customers` (index, RowVersion, soft delete, CreatedBy/UpdatedBy) |
+| `AddAuditLogs` | Bảng `AuditLogs` |
+| `AddRefreshTokenAndLockout` | Bảng `RefreshTokens`, cột `Users.FailedLoginAttempts` / `LockedOutUntil` |
+
+Chỉ cần áp dụng vào database (chạy từ thư mục gốc solution):
 
 ```bash
-# từ thư mục gốc solution
-dotnet tool install --global dotnet-ef   # nếu chưa có
-dotnet ef migrations add InitialCreate \
-  --project src/CustomerManager.Infrastructure \
-  --startup-project src/CustomerManager.WebApi \
-  --output-dir Persistence/Migrations
-
 dotnet ef database update \
   --project src/CustomerManager.Infrastructure \
   --startup-project src/CustomerManager.WebApi
 ```
 
-**Vì sao chưa có migration sẵn:** một EF Core migration là code sinh ra bởi công cụ `dotnet-ef` sau khi compiler đã xác nhận model hợp lệ — tôi không có quyền chạy công cụ đó trong môi trường viết code này (không có NuGet). Viết tay một migration là rủi ro cao (dễ sai với schema thật), nên bước này cố ý để bạn tự sinh bằng tooling chính chủ, đúng thực hành chuẩn (migration luôn nên do tool sinh, không nên viết tay).
+> Không chạy lại `dotnet ef migrations add InitialCreate` (hay task VS Code `ef-migrations-add-InitialCreate`) — migration này đã tồn tại. Chỉ dùng `migrations add <TênMới>` khi bạn thay đổi model.
 
-### 5. CORS cho Blazor (dev)
+### 5. Cấu hình tuỳ chọn
 
-`src/CustomerManager.WebApi/appsettings.Development.json` đã có sẵn `https://localhost:7100` / `http://localhost:5100` — chỉnh nếu Blazor chạy ở port khác trên máy bạn.
+| Key | Mặc định | Ý nghĩa |
+|---|---|---|
+| `Jwt:ExpiryMinutes` | 15 | Thời hạn access token |
+| `Jwt:RefreshTokenExpiryDays` | 7 | Thời hạn refresh token |
+| `Security:MaxFailedLoginAttempts` | 5 | Số lần sai trước khi khoá tài khoản |
+| `Security:LockoutDurationMinutes` | 15 | Thời gian khoá |
+| `ConnectionStrings:Redis` | (trống) | Có giá trị thì Output Cache dùng Redis, trống thì dùng in-memory |
+| `Cors:AllowedOrigins` | `http://localhost:5100`, `https://localhost:7100` (Development) | Origin của Blazor được phép gọi API |
 
 ## IV. Chạy ứng dụng
 
-### Cách chạy bằng VS Code (khuyến nghị)
+| Thành phần | Địa chỉ mặc định |
+|---|---|
+| API (profile `http`, mặc định) | `http://localhost:5050` — Swagger: `http://localhost:5050/swagger` |
+| API (profile `https`) | `https://localhost:7050` |
+| Blazor | `http://localhost:5100` (hoặc `https://localhost:7100`) |
 
-Mở đúng thư mục chứa `CustomerManager.sln` (`CustomerManager/CustomerManager`). VS Code sẽ đọc cấu hình trong `.vscode/`:
+Blazor gọi API qua `ApiBaseUrl` trong `src/CustomerManager.Blazor/wwwroot/appsettings.json` (mặc định `http://localhost:5050/`) — nếu đổi port hoặc chạy API bằng profile `https`, sửa lại giá trị này cho khớp.
 
-1. Cài extension **C# Dev Kit** khi VS Code đề xuất, sau đó đợi solution tải xong.
-2. Nhấn `Ctrl+Shift+B` và chọn task `build` để restore và build solution.
-3. Nhấn `Ctrl+Shift+D`, chọn `API + Blazor (chạy song song)` rồi nhấn `F5`. API chạy tại `https://localhost:7050/swagger`, Blazor tại `http://localhost:5100`.
-4. Nhấn `Ctrl+Shift+P` → **Tasks: Run Task** để chạy `ef-migrations-add-InitialCreate`, `ef-database-update` hoặc `test`.
+### Bằng VS Code (khuyến nghị)
 
-Lần đầu cần cài `dotnet-ef` và hoàn tất User Secrets ở mục III trước khi chạy migration. Có thể đặt breakpoint trong Controller, Service và file `.razor` khi debug.
+Mở thư mục gốc repo (thư mục chứa `CustomerManager.sln`). VS Code đọc cấu hình trong `.vscode/`:
+
+1. Cài extension **C# Dev Kit** khi được đề xuất, đợi solution tải xong.
+2. `Ctrl+Shift+B` → task `build`.
+3. `Ctrl+Shift+D` → chọn **API + Blazor (chạy song song)** → `F5`.
+4. `Ctrl+Shift+P` → **Tasks: Run Task** → `ef-database-update` hoặc `test`.
+
+### Bằng dòng lệnh
 
 ```bash
-# Terminal 1 — API (Swagger tự mở ở https://localhost:7050/swagger)
+# Terminal 1 — API
 dotnet run --project src/CustomerManager.WebApi
+# hoặc chạy HTTPS: dotnet run --project src/CustomerManager.WebApi --launch-profile https
 
 # Terminal 2 — Blazor WebAssembly
 dotnet run --project src/CustomerManager.Blazor
 ```
 
-Đăng nhập bằng tài khoản đã set ở `AdminSeed:Username`/`AdminSeed:Password` bước III.3.
+Mở `http://localhost:5100`, đăng nhập bằng tài khoản ở bước III.3.
+
+### Giao diện
+
+| Route | Màn hình |
+|---|---|
+| `/login` | Đăng nhập (ẩn/hiện mật khẩu, ghi nhớ username, thông báo khoá tài khoản) |
+| `/` | Dashboard — tổng số / đang hoạt động / ngừng hoạt động |
+| `/customers` | Danh sách khách hàng — tìm kiếm, lọc, phân trang, Thêm/Sửa/Xoá, xoá hàng loạt |
+| `/customers/{id}` | Chi tiết khách hàng + lịch sử thay đổi |
+| `Ctrl+K` | Command Palette — điều hướng nhanh, thêm khách hàng, đổi sáng/tối, đăng xuất |
 
 ### Lỗi thường gặp
 
-- **`dotnet` không nhận hoặc không có SDK:** cài .NET 8 SDK, mở lại VS Code và kiểm tra `dotnet --version` trả về `8.x`.
-- **Lỗi HTTPS certificate:** chạy `dotnet dev-certs https --trust`, sau đó khởi động lại API.
-- **Port đã được sử dụng:** đóng tiến trình đang dùng port `7050` hoặc `5100`, hoặc cập nhật đồng thời `launchSettings.json`, `.vscode/launch.json` và `Cors:AllowedOrigins`.
-- **IntelliSense không nhận project:** mở thư mục chứa `CustomerManager.sln`, cài **C# Dev Kit**, rồi chạy lệnh `C# Dev Kit: Restart Language Server` từ Command Palette.
+- **`dotnet` không nhận / không có SDK:** cài .NET 8 SDK, mở lại VS Code, kiểm tra `dotnet --version` trả về `8.x`.
+- **API dừng ngay khi start với lỗi `Jwt:Secret is missing`:** chưa làm bước III.2 (User Secrets gắn với project `CustomerManager.WebApi`).
+- **Đăng nhập báo sai dù đúng mật khẩu:** kiểm tra bước III.3 đã set trước khi API chạy lần đầu; seeder chỉ tạo admin khi bảng `Users` trống.
+- **Blazor báo lỗi gọi API / CORS:** kiểm tra API đang chạy đúng địa chỉ trong `ApiBaseUrl`, và origin của Blazor có trong `Cors:AllowedOrigins`.
+- **Lỗi HTTPS certificate:** `dotnet dev-certs https --trust`, rồi khởi động lại API.
+- **Port đã được sử dụng:** đóng tiến trình đang dùng port `5050`/`7050`/`5100`/`7100`, hoặc cập nhật đồng thời `launchSettings.json`, `.vscode/launch.json`, `ApiBaseUrl` và `Cors:AllowedOrigins`.
+- **Nhận 423 khi đăng nhập:** tài khoản đang bị khoá do sai quá 5 lần — đợi hết thời gian khoá (hoặc giảm `Security:LockoutDurationMinutes` khi dev).
+- **IntelliSense không nhận project:** mở đúng thư mục chứa `CustomerManager.sln`, chạy `C# Dev Kit: Restart Language Server`.
 
-## V. Chạy test
+## V. API
+
+| Method | Endpoint | Auth | Mô tả |
+|---|---|---|---|
+| POST | `/api/auth/login` | Anonymous | Đăng nhập — 200 / 401 / 423 (bị khoá) / 429 (rate limit) |
+| POST | `/api/auth/refresh` | Anonymous | Đổi refresh token lấy access token mới (token cũ bị thu hồi) |
+| POST | `/api/auth/logout` | Anonymous | Thu hồi refresh token phía server — 204 |
+| GET | `/api/customers` | Bearer | Danh sách: `fullName`, `phoneNumber`, `isActive`, `pageNumber`, `pageSize` (≤100), `sortBy` (`fullName`/`customerCode`/`createdAt`), `sortDirection` |
+| GET | `/api/customers/{id}` | Bearer | Chi tiết (kèm `rowVersion`) — 200 / 404 |
+| GET | `/api/customers/{id}/audit-logs` | Bearer | Lịch sử thay đổi, mới nhất trước |
+| POST | `/api/customers` | Bearer | Thêm mới — 201 / 400 / 409 (trùng Email) |
+| PUT | `/api/customers/{id}` | Bearer | Cập nhật, gửi kèm `rowVersion` — 200 / 400 / 404 / 409 (xung đột) |
+| DELETE | `/api/customers/{id}` | Bearer | Xoá mềm — 204 / 404 |
+
+Lỗi trả về dạng `application/problem+json` (RFC 7807). Swagger UI (chỉ bật ở Development) có sẵn nút **Authorize** để nhập Bearer token.
+
+## VI. Chạy test
 
 ```bash
 dotnet test
 ```
 
-12 test case cho `CustomerService`/`AuthService` (EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn của cách tiếp cận này), cộng thêm bộ test cho `CreateCustomerRequestValidator`.
+**34 test** (xUnit + FluentAssertions + EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn):
 
-## VI. Các quyết định kỹ thuật đáng chú ý (đã giải thích chi tiết bằng comment trong code)
+| File | Nội dung |
+|---|---|
+| `CustomerServiceTests` | Tạo + sinh Mã KH tuần tự, trùng Email, lấy theo Id (kể cả đã xoá mềm), xoá bản ghi không tồn tại, cập nhật + xung đột RowVersion, lọc theo Họ tên |
+| `AuthServiceTests` | Đăng nhập đúng/sai, khoá tài khoản, refresh token rotation, replay bị từ chối, logout |
+| `CreateCustomerRequestValidatorTests` | Email, SĐT, ngày sinh |
+| `AuditLogInterceptorTests` | Ghi Added / Modified (chỉ field thay đổi) / Deleted, thứ tự mới nhất trước |
+
+## VII. Các quyết định kỹ thuật đáng chú ý (giải thích chi tiết bằng comment trong code)
 
 | Quyết định | Xem tại |
 |---|---|
 | Không Repository generic, dùng `IApplicationDbContext` mỏng | `Application/Interfaces/IApplicationDbContext.cs` |
-| Soft delete + audit tự động, không set thủ công trong Service | `Infrastructure/Persistence/Interceptors/SoftDeleteAndAuditInterceptor.cs` |
+| Soft delete + CreatedBy/UpdatedBy tự động, không set thủ công trong Service | `Infrastructure/Persistence/Interceptors/SoftDeleteAndAuditInterceptor.cs` |
+| AuditLog riêng (Old/New JSON), tách khỏi soft-delete interceptor | `Infrastructure/Persistence/Interceptors/AuditLogInterceptor.cs` |
 | `CustomerCode` là clustered index, `Id` (GUID) không clustered | `Infrastructure/Persistence/Configurations/CustomerConfiguration.cs` |
 | Seed admin qua `IHostedService`, không qua migration `HasData()` | `Infrastructure/Authentication/AdminUserSeeder.cs` |
 | ProblemDetails (RFC 7807) thay vì envelope tự chế | `WebApi/ExceptionHandling/GlobalExceptionHandler.cs` |
-| Output Cache optional/pluggable Redis + invalidate theo tag | `WebApi/Program.cs` (`ConfigureOutputCache`, `EvictByTagAsync` trong `CustomersController`) |
-| JWT lưu in-memory ở Blazor, không localStorage | `Blazor/Services/TokenProvider.cs` |
+| Output Cache optional/pluggable Redis + invalidate theo tag | `WebApi/Program.cs`, `EvictByTagAsync` trong `CustomersController` |
+| Access + refresh token chỉ lưu in-memory ở Blazor, không localStorage | `Blazor/Services/TokenProvider.cs` |
+| Tự làm mới phiên trước khi access token hết hạn | `Blazor/Services/SilentRefreshScheduler.cs` |
+| Refresh token: chỉ lưu SHA-256 hash, rotation mỗi lần refresh | `Application/Services/AuthService.cs` |
+| Account lockout sau N lần sai (cấu hình qua `Security:*`) | `Domain/Entities/User.cs`, `Application/Services/AuthService.cs` |
+| Security headers (CSP / X-Frame-Options / nosniff), ẩn `Server` header, HSTS ngoài Development | `WebApi/Program.cs` |
 | Không AutoMapper | `Application/Mappings/CustomerMappingExtensions.cs` |
-| AuditLog riêng (Old/New JSON), tách khỏi soft-delete interceptor | `Infrastructure/Persistence/Interceptors/AuditLogInterceptor.cs` |
-| Refresh token: chỉ lưu SHA-256 hash trong DB, rotation mỗi lần refresh | `Application/Services/AuthService.cs` |
-| Account lockout sau N lần sai (mặc định 5 lần/15 phút, cấu hình qua `Security:*`) | `Domain/Entities/User.cs`, `Application/Services/AuthService.cs` |
-| Security response headers (CSP/X-Frame-Options/nosniff), ẩn `Server` header, HSTS khi không phải Development | `WebApi/Program.cs` |
 
-Toàn bộ phân tích đầy đủ (requirement, UI, ERD, API design, estimation, risk...) nằm ở `docs/System-Analysis-Phase1.md`.
+## VIII. Git workflow
 
-## VII. Việc còn lại / Possible Improvements
+- Nhánh: `main` (ổn định) ← `develop` (tích hợp) ← `feature/*`, `test/*`. Các nhánh đã dùng: `feature/core-domain`, `feature/customer-crud-api`, `feature/mudblazor-datagrid`, `test/customer-service`, `feature/audit-log`, `feature/security-hardening-phase1`.
+- Commit theo Conventional Commits có scope, ví dụ `feat(api): ...`, `feat(ui): ...`, `test(application): ...`, `fix: ...`, `docs: ...`, `chore(vscode): ...`.
 
-- `CustomerManager.IntegrationTests` (đã đề cập trong thiết kế, chưa scaffold trong lần commit này) — nơi phù hợp để test hành vi phụ thuộc SQL Server thật: unique constraint trên `CustomerCode`/`Email`, ROWVERSION auto-generation.
-- CI (GitHub Actions) chạy `dotnet build` + `dotnet test` trên mỗi PR.
-- Export Excel/CSV, Entra ID, bảng `Users` mở rộng role — xem mục "Possible Improvements" trong tài liệu Phase 1.
+## IX. Việc còn lại / Possible Improvements
 
-### Đánh đổi bảo mật có chủ đích (chưa làm, có lý do)
+- `CustomerManager.IntegrationTests` với SQL Server thật (Testcontainers) — kiểm tra unique constraint `CustomerCode`/`Email` và ROWVERSION ở mức database (InMemory provider không tái hiện chính xác 2 hành vi này).
+- CI (GitHub Actions) chạy `dotnet build` + `dotnet test` cho mỗi PR.
+- API xoá hàng loạt phía backend (UI hiện gọi lần lượt từng `DELETE`).
+- Export Excel/CSV, Full-Text Search khi dữ liệu lớn, Microsoft Entra ID.
 
-- **Multi-user / RBAC (Admin/Staff/Viewer):** hệ thống vẫn giữ đúng thiết kế ban đầu — 1 tài khoản admin duy nhất, không có endpoint đăng ký (xem `AdminUserSeeder.cs`). Đây là quyết định giảm attack surface có chủ đích, không phải thiếu sót. Nếu cần nhiều người dùng/phân quyền thật, cần thiết kế lại bảng `Users` + `Roles` và áp dụng `[Authorize(Roles = ...)]` theo từng endpoint.
-- **Mã hoá SĐT/CCCD trong DB (AES field-level):** chưa triển khai. Lý do: `CustomerService.GetPagedAsync` hiện tìm kiếm theo số điện thoại bằng `PhoneNumber.Contains(...)` (dịch sang `LIKE '%...%'` ở SQL Server) — mã hoá AES chuẩn sẽ làm mất khả năng này (mỗi lần mã hoá cùng giá trị ra ciphertext khác nhau, hoặc nếu dùng mã hoá tất định thì chỉ tìm được chính xác, không tìm được theo chuỗi con). Hướng cải tiến trong tương lai nếu cần: mã hoá cột thật (EF Core Value Converter hoặc SQL Server Always Encrypted) + thêm cột "blind index" (hash tất định của số đã chuẩn hoá) để tìm kiếm exact-match, chấp nhận đánh đổi không tìm được theo số điện thoại một phần.
+### Đánh đổi bảo mật có chủ đích
 
-## VIII. Tài liệu & tài nguyên bổ sung
+- **Multi-user / RBAC (Admin/Staff/Viewer):** giữ đúng yêu cầu đề bài — 1 tài khoản admin duy nhất, không có endpoint đăng ký (xem `AdminUserSeeder.cs`). Đây là quyết định giảm attack surface, không phải thiếu sót. Nếu cần nhiều người dùng/phân quyền, cần thiết kế lại `Users` + `Roles` và áp dụng `[Authorize(Roles = ...)]` theo endpoint.
+- **Mã hoá SĐT/CCCD trong DB (AES field-level):** chưa triển khai, vì `CustomerService.GetPagedAsync` tìm SĐT bằng `PhoneNumber.Contains(...)` (`LIKE '%...%'`) — mã hoá sẽ làm mất khả năng tìm theo chuỗi con. Hướng cải tiến: mã hoá cột (EF Core Value Converter hoặc SQL Server Always Encrypted) + cột "blind index" (hash tất định của số đã chuẩn hoá) để tìm exact-match, chấp nhận không tìm được theo một phần số.
+
+## X. Tài liệu & tài nguyên bổ sung
 
 | Tài liệu | Vị trí | Mô tả |
 |---|---|---|
-| Phân tích & Thiết kế đầy đủ (Markdown) | `docs/System-Analysis-Phase1.md` | Toàn bộ Phase 1: requirement, UI, ERD, API design, security, estimation, risk (v3) |
-| Phân tích chức năng/UI/DB (Word) | `docs/PHAN-TICH-VA-KE-HOACH.docx` | Bản rút gọn theo đúng 3 mục yêu cầu: chức năng & UI, thiết kế DB, tóm tắt estimation — dùng để nộp/trình bày |
-| Bảng ước lượng thời gian (Excel) | `docs/Estimation-WBS.xlsx` | WBS chi tiết theo giờ cho từng hạng mục công việc, có công thức tổng |
-| Postman Collection | `postman/CustomerManager.postman_collection.json` | Import vào Postman để gọi thử toàn bộ API (login, CRUD customers) kèm ví dụ response |
-| Kịch bản quay demo | `docs/Demo-Script.md` | Các bước cụ thể để tự quay video demo tính năng, đúng thứ tự nên trình bày |
+| Phân tích & Thiết kế (Markdown) | `docs/System-Analysis-Phase1.md` | Requirement, UI, ERD, API, security, estimation, risk; mục 0.2 (v4) ghi các thay đổi khi triển khai |
+| Phân tích chức năng/UI/DB (Word) | `docs/PHAN-TICH-VA-KE-HOACH.docx` | Bản 2.0: 16 chức năng, 7 màn hình, 4 bảng dữ liệu, tóm tắt ước lượng — dùng để nộp/trình bày |
+| Bảng ước lượng thời gian (Excel) | `docs/Estimation-WBS.xlsx` | WBS chi tiết 10 hạng mục (67.5h), có công thức tổng |
+| Postman Collection | `postman/CustomerManager.postman_collection.json` | Login / Refresh / Logout, CRUD, lịch sử thay đổi, kèm response mẫu |
+| Kịch bản quay demo | `docs/Demo-Script.md` | Các bước quay video demo theo thứ tự nên trình bày |
 
 ### Import Postman Collection
 
-1. Mở Postman → **Import** → chọn `postman/CustomerManager.postman_collection.json`.
-2. Tạo Environment mới với 2 biến: `baseUrl` (ví dụ `https://localhost:7050`) và `token` (để trống — request "Login" sẽ tự động set biến này qua Postman test script sau khi đăng nhập thành công).
-3. Chạy request **Auth → Login** trước tiên, sau đó mọi request Customers khác sẽ tự động đính kèm `Authorization: Bearer {{token}}`.
+1. Postman → **Import** → chọn `postman/CustomerManager.postman_collection.json`.
+2. Kiểm tra biến collection `baseUrl` khớp với API đang chạy — `http://localhost:5050` (profile mặc định) hoặc `https://localhost:7050` (profile `https`).
+3. Chạy **Auth → Login** trước — script tự lưu `token` và `refreshToken`; mọi request Customers tự đính kèm `Authorization: Bearer {{token}}`.
+4. Khi access token hết hạn (15 phút), chạy **Auth → Refresh token** để lấy token mới.
