@@ -4,8 +4,6 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 
 ## Tình trạng dự án
 
-- Toàn bộ solution **build thành công**, đã có sẵn **3 EF Core migration** và đã smoke-test end-to-end với SQL Server thật (login / refresh / logout / CRUD / audit log / rate limit / security headers).
-- **34/34 unit test pass** (`dotnet test`).
 - Đã hoàn thành đầy đủ tính năng bắt buộc và cả 3 hạng mục Bonus của đề bài (MudBlazor, JWT, Git).
 
 ## Tính năng
