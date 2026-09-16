@@ -1,9 +1,11 @@
+using System.Net;
 using System.Text;
 using System.Threading.RateLimiting;
 using CustomerManager.Application;
 using CustomerManager.Infrastructure;
 using CustomerManager.WebApi.ExceptionHandling;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -13,6 +15,30 @@ var builder = WebApplication.CreateBuilder(args);
 // Don't announce "Kestrel" to every caller — a minor bit of stack-fingerprinting
 // hardening (OWASP: don't leak technology details in headers).
 builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
+// ---------------------------------------------------------------------------
+// Forwarded headers (X-Forwarded-For/-Proto) for when this API sits behind a
+// reverse proxy/load balancer. Only trusted once at least one proxy IP is
+// explicitly configured — trusting these headers unconditionally would let any
+// client spoof its own IP (defeats the login rate limiter below) and scheme
+// (Issue M7). Configure "ForwardedHeaders:KnownProxies" in production.
+// ---------------------------------------------------------------------------
+var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.KnownProxies.Clear();
+    foreach (var proxy in knownProxies)
+    {
+        if (IPAddress.TryParse(proxy, out var ip))
+        {
+            options.KnownProxies.Add(ip);
+        }
+    }
+
+    options.ForwardedHeaders = knownProxies.Length > 0
+        ? ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+        : ForwardedHeaders.None;
+});
 
 // ---------------------------------------------------------------------------
 // Application + Infrastructure (Services, FluentValidation, EF Core, JWT, seeder)
@@ -86,33 +112,6 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // ---------------------------------------------------------------------------
-// Output Caching for GET /api/customers. Redis is optional/pluggable: if
-// ConnectionStrings:Redis is configured, cached entries are shared across
-// instances; otherwise this falls back to the built-in in-memory store so the
-// Mini Project runs with zero extra infrastructure. Either way, every write
-// endpoint evicts the "customers" tag (see CustomersController) — an admin must
-// never see stale data after their own edit.
-// ---------------------------------------------------------------------------
-void ConfigureOutputCache(Microsoft.AspNetCore.OutputCaching.OutputCacheOptions options)
-{
-    options.AddPolicy("CustomersListPolicy", policy => policy
-        .Expire(TimeSpan.FromSeconds(30))
-        .Tag("customers")
-        .SetVaryByQuery("fullName", "phoneNumber", "isActive", "pageNumber", "pageSize", "sortBy", "sortDirection"));
-}
-
-var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
-builder.Services.AddOutputCache(ConfigureOutputCache);
-if (!string.IsNullOrWhiteSpace(redisConnectionString))
-{
-    builder.Services.AddStackExchangeRedisOutputCache(options =>
-    {
-        options.Configuration = redisConnectionString;
-        options.InstanceName = "CustomerManager:";
-    });
-}
-
-// ---------------------------------------------------------------------------
 // CORS — only the configured Blazor client origin(s), never AllowAnyOrigin.
 // ---------------------------------------------------------------------------
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -157,6 +156,8 @@ builder.Services.AddHsts(options =>
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders(); // must run before anything that reads RemoteIpAddress/scheme (rate limiter, HTTPS redirection).
 
 app.UseExceptionHandler(); // delegates to GlobalExceptionHandler for every environment — no leaked stack traces even in dev.
 
@@ -207,9 +208,8 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseOutputCache();
-
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Run();
 

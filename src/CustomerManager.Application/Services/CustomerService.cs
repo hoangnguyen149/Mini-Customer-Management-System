@@ -11,10 +11,12 @@ namespace CustomerManager.Application.Services;
 public class CustomerService : ICustomerService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ICustomerCodeGenerator _customerCodeGenerator;
 
-    public CustomerService(IApplicationDbContext context)
+    public CustomerService(IApplicationDbContext context, ICustomerCodeGenerator customerCodeGenerator)
     {
         _context = context;
+        _customerCodeGenerator = customerCodeGenerator;
     }
 
     public async Task<PagedResult<CustomerListItemDto>> GetPagedAsync(CustomerQueryParameters query, CancellationToken ct)
@@ -87,31 +89,31 @@ public class CustomerService : ICustomerService
             throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
         }
 
-        // CustomerCode is generated server-side and is a unique business key.
-        // Two concurrent creates could compute the same "next" code, so this
-        // retries a couple of times on a unique-constraint violation rather than
-        // trusting the pre-check alone (the DB unique index is the real guard).
-        const int maxAttempts = 3;
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            var code = await GenerateNextCustomerCodeAsync(ct);
-            var customer = Customer.Create(code, request.FullName, request.Email, request.PhoneNumber, request.DateOfBirth, request.IsActive);
-            _context.Customers.Add(customer);
+        // CustomerCode comes from a DB sequence (see ICustomerCodeGenerator /
+        // Issue M2), so two concurrent creates can never be handed the same
+        // code — no retry loop needed for that. The one remaining race is two
+        // concurrent requests using the same Email; the pre-check above closes
+        // most of that window, and the filtered unique index (Issue H2) is the
+        // real guard for what's left.
+        var code = await _customerCodeGenerator.NextAsync(ct);
+        var customer = Customer.Create(code, request.FullName, request.Email, request.PhoneNumber, request.DateOfBirth, request.IsActive);
+        _context.Customers.Add(customer);
 
-            try
-            {
-                await _context.SaveChangesAsync(ct);
-                return customer.ToDetailDto();
-            }
-            catch (DbUpdateException) when (attempt < maxAttempts)
-            {
-                // Remove on an Added entity detaches it (EF Core behavior), so the
-                // next loop iteration starts from a clean tracking state.
-                _context.Customers.Remove(customer);
-            }
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // The earlier retry loop here used to catch this broadly and retry
+            // with a new code, which (a) was solving the wrong problem — codes
+            // never collide anymore — and (b) left orphaned "Added" AuditLog rows
+            // behind on every retry (Issue M8). A DbUpdateException at this point
+            // can now only be the Email unique index rejecting a same-email race.
+            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
         }
 
-        throw new ConflictException("Không thể tạo mã khách hàng do xung đột dữ liệu, vui lòng thử lại.");
+        return customer.ToDetailDto();
     }
 
     public async Task<CustomerDetailDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken ct)
@@ -158,6 +160,13 @@ public class CustomerService : ICustomerService
             // call — same conflict, same message, just caught at the DB level.
             throw new ConflictException("Dữ liệu khách hàng đã được người khác cập nhật. Vui lòng tải lại trang.");
         }
+        catch (DbUpdateException)
+        {
+            // DbUpdateConcurrencyException (above) is the RowVersion race;
+            // this is the Email race — two updates racing to the same new email
+            // used to surface as a raw 500 here instead of a 409 (Issue H2).
+            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
+        }
 
         return customer.ToDetailDto();
     }
@@ -190,27 +199,5 @@ public class CustomerService : ICustomerService
                 Timestamp = a.Timestamp
             })
             .ToListAsync(ct);
-    }
-
-    private async Task<string> GenerateNextCustomerCodeAsync(CancellationToken ct)
-    {
-        const string prefix = "KH-";
-
-        // IgnoreQueryFilters(): soft-deleted customers must still "reserve" their
-        // code so a new customer never accidentally reuses a deleted one's code.
-        var lastCode = await _context.Customers
-            .IgnoreQueryFilters()
-            .OrderByDescending(c => c.CustomerCode)
-            .Select(c => c.CustomerCode)
-            .FirstOrDefaultAsync(ct);
-
-        var nextNumber = 1;
-        if (lastCode is not null && lastCode.StartsWith(prefix, StringComparison.Ordinal)
-            && int.TryParse(lastCode.AsSpan(prefix.Length), out var parsed))
-        {
-            nextNumber = parsed + 1;
-        }
-
-        return $"{prefix}{nextNumber:D4}";
     }
 }

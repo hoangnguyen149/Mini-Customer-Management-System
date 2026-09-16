@@ -23,7 +23,13 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.Property(x => x.FullName).HasMaxLength(100).IsRequired();
 
-        builder.HasIndex(x => x.Email).IsUnique();
+        // Filtered unique index: only rows where IsDeleted = 0 participate in the
+        // uniqueness constraint, so an email is freed up once its customer is
+        // soft-deleted. This matches the duplicate-email checks in CustomerService,
+        // which go through the Global Query Filter and therefore already ignore
+        // deleted rows — before this filter, that mismatch let a deleted row's
+        // email silently block every future create/update on that email (Issue H2).
+        builder.HasIndex(x => x.Email).IsUnique().HasFilter("[IsDeleted] = 0");
         builder.Property(x => x.Email).HasMaxLength(150).IsRequired();
 
         // Not unique: PhoneNumber is indexed for search performance only (see
@@ -33,7 +39,13 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.Property(x => x.DateOfBirth).IsRequired();
 
-        builder.Property(x => x.IsActive).HasDefaultValue(true);
+        // No HasDefaultValue: EF Core treats a bool's CLR default (false) as
+        // "not set" and silently drops the column from the INSERT statement
+        // whenever a default value is configured, letting the DB default (true)
+        // win even when the caller explicitly asked for IsActive = false
+        // (Issue H1). Customer.Create always assigns IsActive explicitly, so
+        // ValueGeneratedNever() forces EF to always send the real value instead.
+        builder.Property(x => x.IsActive).IsRequired().ValueGeneratedNever();
 
         builder.Property(x => x.IsDeleted).HasDefaultValue(false);
         // Filtered index: most queries go through the Global Query Filter

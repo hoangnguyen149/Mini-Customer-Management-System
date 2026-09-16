@@ -37,7 +37,24 @@ public class AdminUserSeeder : IHostedService
         var context = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasherService>();
 
-        if (await context.Users.AnyAsync(cancellationToken))
+        bool alreadySeeded;
+        try
+        {
+            alreadySeeded = await context.Users.AnyAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The most common cause by far is "the database hasn't been migrated
+            // yet" (Issue M7) — that used to surface here as a raw EF/SQL
+            // exception with no indication of what to actually do about it.
+            _logger.LogCritical(ex,
+                "Could not query the Users table — the database has most likely not been migrated yet. Run " +
+                "'dotnet ef database update --project src/CustomerManager.Infrastructure --startup-project src/CustomerManager.WebApi' " +
+                "and restart the API.");
+            throw;
+        }
+
+        if (alreadySeeded)
         {
             return; // Already seeded — never overwrite an existing admin's password here.
         }

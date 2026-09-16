@@ -1,8 +1,114 @@
-# Mini Customer Management System — Phase 1: Analysis & Design (v2)
+# Mini Customer Management System — Phase 1: Analysis & Design (v4)
 
-**Phase:** Analysis only — chưa có code.
-**Revision:** v2 — tích hợp báo cáo thiết kế chuyên sâu do bạn cung cấp, thay thế/giải quyết các mục còn treo ở v1.
-**Ngày:** 2026-09-15
+**Phase:** Analysis & Design — **đã triển khai** (GitHub `main@732cb1f`).
+**Revision:** v4 (2026-09-17) — thêm mục 0.2 đồng bộ thiết kế với code thực tế. Các mục 0.1 → 19 bên dưới giữ nguyên nội dung v2/v3 để lưu vết quyết định; **khi có mâu thuẫn, mục 0.2 là bản đúng**.
+**Ngày gốc:** 2026-09-15
+
+---
+
+## 0.2 Ghi chú v4 — đồng bộ với code đã triển khai (2026-09-17)
+
+### Thay đổi so với thiết kế v3
+
+| Hạng mục | Thiết kế v3 | Thực tế trong code |
+|---|---|---|
+| Lưu JWT ở Blazor (câu hỏi ⚠️ ở 0.1) | Chờ xác nhận localStorage vs in-memory | **Chốt in-memory** (`TokenProvider` Singleton). `localStorage` chỉ lưu username "ghi nhớ" và theme |
+| Thời hạn access token | 60 phút | **15 phút** + refresh token 7 ngày, `SilentRefreshScheduler` tự làm mới |
+| Refresh token | Không có | Bảng `RefreshTokens`, chỉ lưu SHA-256 hash, rotation mỗi lần refresh |
+| Account lockout | Chỉ rate limit | 5 lần sai → khoá 15 phút (cột `Users.FailedLoginAttempts`, `LockedOutUntil`), trả **423** |
+| Audit | `CreatedBy/UpdatedBy`; `CustomerAuditLogs` là Nice to have | Cả hai: `CreatedBy/UpdatedBy` + bảng **`AuditLogs`** (Old/New JSON, chỉ field thay đổi) qua `AuditLogInterceptor` riêng |
+| Endpoint | login + 5 CRUD | Thêm `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/customers/{id}/audit-logs` |
+| UI | 3 khu vực (Login, List, Dialog); xem chi tiết gộp vào dialog | 4 route: `/login`, `/` Dashboard KPI, `/customers`, **`/customers/{id}`** (chi tiết + lịch sử) + Command Palette Ctrl+K, dark mode, bulk delete, mobile card view |
+| Transport hardening | HTTPS + HSTS, CORS | Thêm security headers (nosniff, X-Frame-Options DENY, Referrer-Policy, CSP ngoài dev), ẩn `Server` header, CORS whitelist method/header |
+| Project | 5 project + UnitTests + IntegrationTests | 6 project (thêm `CustomerManager.Contracts`) + UnitTests; **IntegrationTests chưa làm** |
+| Sort | `sortBy` | `sortBy` (fullName/customerCode/createdAt) + `sortDirection`; `pageSize` tối đa 100 |
+| Test | 12 case | 34 test pass (CustomerService, AuthService, Validator, AuditLogInterceptor) |
+| Kiểu chuỗi | `varchar` cho CustomerCode, Email, PhoneNumber, CreatedBy/UpdatedBy, Username | **`nvarchar`** cùng độ dài (mặc định của EF Core, theo migration thực tế) |
+| `Customers.Id` mặc định | `NEWID()` phía DB | **Ứng dụng sinh** `Guid.NewGuid()` trong `Customer.Create` |
+| Index Họ tên | `IX_Customers_FullName` | **Không tạo** — `Contains()` dịch thành `LIKE '%...%'` nên không tận dụng được B-tree index |
+| Validate SĐT | Không chốt định dạng | Regex `^0\d{9}$` (10 số, bắt đầu bằng 0) |
+
+### ERD thực tế
+
+```mermaid
+erDiagram
+    USERS ||--o{ REFRESH_TOKENS : "có"
+    USERS {
+        guid Id PK
+        nvarchar Username UK
+        nvarchar PasswordHash
+        datetime2 CreatedAt
+        int FailedLoginAttempts
+        datetime2 LockedOutUntil
+    }
+    REFRESH_TOKENS {
+        guid Id PK
+        guid UserId FK
+        string TokenHash "SHA-256, index"
+        datetime2 ExpiresAtUtc
+        datetime2 CreatedAtUtc
+        datetime2 RevokedAtUtc
+    }
+    CUSTOMERS {
+        guid Id PK
+        nvarchar CustomerCode UK "Clustered"
+        nvarchar FullName
+        nvarchar Email UK
+        nvarchar PhoneNumber
+        date DateOfBirth
+        bit IsActive
+        bit IsDeleted
+        datetime2 CreatedAt
+        nvarchar CreatedBy
+        datetime2 UpdatedAt
+        nvarchar UpdatedBy
+        rowversion RowVersion
+    }
+    AUDIT_LOGS {
+        guid Id PK
+        string EntityName
+        string EntityId "không FK"
+        string Action "Added/Modified/Deleted"
+        string OldValues "JSON"
+        string NewValues "JSON"
+        string UserName
+        datetime2 Timestamp
+    }
+```
+
+`AUDIT_LOGS` cố ý không có FK tới `CUSTOMERS` (audit phải tồn tại độc lập với bản ghi được ghi vết).
+
+### API thực tế
+
+| Method | Endpoint | Auth | Mã trả về |
+|---|---|---|---|
+| POST | `/api/auth/login` | Anonymous + rate limit | 200 / 400 / 401 / 423 / 429 |
+| POST | `/api/auth/refresh` | Anonymous + rate limit | 200 / 401 / 429 |
+| POST | `/api/auth/logout` | Anonymous | 204 |
+| GET | `/api/customers` | Bearer | 200 (Output Cache 30s, tag `customers`) |
+| GET | `/api/customers/{id}` | Bearer | 200 / 404 |
+| GET | `/api/customers/{id}/audit-logs` | Bearer | 200 |
+| POST | `/api/customers` | Bearer | 201 / 400 / 409 |
+| PUT | `/api/customers/{id}` | Bearer | 200 / 400 / 404 / 409 |
+| DELETE | `/api/customers/{id}` | Bearer | 204 / 404 |
+
+### Index thực tế
+
+`IX_Customers_CustomerCode` (clustered, unique) · `IX_Customers_Email` (unique) · `IX_Customers_PhoneNumber` · `IX_Customers_IsDeleted` (filtered `[IsDeleted] = 0`) · `IX_Users_Username` (unique) · `IX_RefreshTokens_TokenHash` (unique) · `IX_RefreshTokens_UserId` · `IX_AuditLogs_EntityName_EntityId_Timestamp`.
+
+### Migration
+
+`20260915184258_InitialCreate` → `20260915204250_AddAuditLogs` → `20260915230139_AddRefreshTokenAndLockout`.
+
+### Quyết định bảo mật có chủ đích (commit `732cb1f`)
+
+- Giữ **1 tài khoản admin**, không RBAC/multi-user — giảm attack surface, đúng yêu cầu "tài khoản admin cứng".
+- **Không mã hoá field SĐT/CCCD** — mã hoá AES làm mất khả năng tìm `Contains()` theo SĐT. Hướng tương lai: Always Encrypted / Value Converter + cột blind index (chỉ tìm exact-match).
+
+### Roadmap (cập nhật §15)
+
+Phase 1–6 ✅ · Phase 7 Testing 🟡 (unit test xong, integration test chưa) · Phase 8 Documentation 🟡 (README, Postman, Demo script cần cập nhật theo tính năng mới).
+
 
 ---
 

@@ -40,6 +40,12 @@ builder.Services
     .AddHttpClient("CustomerManagerApi", client => client.BaseAddress = new Uri(apiBaseUrl))
     .AddHttpMessageHandler<AuthorizationMessageHandler>();
 
+// Same base address, but deliberately WITHOUT AuthorizationMessageHandler: used
+// only for the token-refresh call itself (SilentRefreshScheduler and
+// AuthorizationMessageHandler's own pre-emptive refresh), so refreshing a token
+// never recurses back into the handler that triggered the refresh.
+builder.Services.AddHttpClient("CustomerManagerApiRaw", client => client.BaseAddress = new Uri(apiBaseUrl));
+
 // Every *ApiService gets the same named, authorization-handler-wrapped HttpClient.
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("CustomerManagerApi"));
 

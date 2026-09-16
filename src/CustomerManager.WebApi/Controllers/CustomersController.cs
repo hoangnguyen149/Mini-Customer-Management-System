@@ -4,7 +4,6 @@ using CustomerManager.Contracts.Customers;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 
 namespace CustomerManager.WebApi.Controllers;
 
@@ -20,22 +19,18 @@ public class CustomersController : ControllerBase
     private readonly ICustomerService _customerService;
     private readonly IValidator<CreateCustomerRequest> _createValidator;
     private readonly IValidator<UpdateCustomerRequest> _updateValidator;
-    private readonly IOutputCacheStore _outputCacheStore;
 
     public CustomersController(
         ICustomerService customerService,
         IValidator<CreateCustomerRequest> createValidator,
-        IValidator<UpdateCustomerRequest> updateValidator,
-        IOutputCacheStore outputCacheStore)
+        IValidator<UpdateCustomerRequest> updateValidator)
     {
         _customerService = customerService;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
-        _outputCacheStore = outputCacheStore;
     }
 
     [HttpGet]
-    [OutputCache(PolicyName = "CustomersListPolicy")]
     public async Task<ActionResult<PagedResult<CustomerListItemDto>>> GetPaged(
         [FromQuery] CustomerQueryParameters query, CancellationToken ct)
     {
@@ -64,11 +59,6 @@ public class CustomersController : ControllerBase
 
         var result = await _customerService.CreateAsync(request, ct);
 
-        // Must happen before returning 201 — otherwise the very next GET /customers
-        // from the admin who just created this row could still serve the stale
-        // cached page (see Program.cs ConfigureOutputCache).
-        await _outputCacheStore.EvictByTagAsync("customers", ct);
-
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
@@ -78,7 +68,6 @@ public class CustomersController : ControllerBase
         await _updateValidator.ValidateAndThrowAsync(request, ct);
 
         var result = await _customerService.UpdateAsync(id, request, ct);
-        await _outputCacheStore.EvictByTagAsync("customers", ct);
 
         return Ok(result);
     }
@@ -87,7 +76,6 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _customerService.DeleteAsync(id, ct);
-        await _outputCacheStore.EvictByTagAsync("customers", ct);
 
         return NoContent();
     }

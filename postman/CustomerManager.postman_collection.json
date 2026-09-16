@@ -2,20 +2,45 @@
   "info": {
     "_postman_id": "b4b0f2b0-4b7b-4b2e-9c1a-c7a3f6a3f001",
     "name": "CustomerManager API — Mini Customer Management System",
-    "description": "Bộ collection đầy đủ cho REST API của Mini Customer Management System (ASP.NET Core 8 Web API). Chạy request \"Auth > Login\" trước — script Tests của nó tự động lưu JWT vào biến môi trường {{token}}, mọi request Customers khác sẽ tự đính kèm header Authorization: Bearer {{token}} qua Collection-level Auth.\n\nXem README.md của repo để biết cách chạy API (connection string, migration, dotnet run).",
+    "description": "Bộ collection đầy đủ cho REST API của Mini Customer Management System (ASP.NET Core 8 Web API). Chạy request \"Auth > Login\" trước — script Tests tự động lưu access token vào {{token}} và refresh token vào {{refreshToken}}; mọi request Customers sẽ tự đính kèm header Authorization: Bearer {{token}} qua Collection-level Auth.\n\nAccess token hết hạn sau 15 phút — chạy \"Auth > Refresh token\" để lấy token mới (refresh token được xoay vòng: token cũ bị thu hồi ngay). \"Auth > Logout\" thu hồi refresh token phía server.\n\nXem README.md của repo để biết cách chạy API (User Secrets, migration, dotnet run).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "bearer",
     "bearer": [
-      { "key": "token", "value": "{{token}}", "type": "string" }
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
     ]
   },
   "variable": [
-    { "key": "baseUrl", "value": "https://localhost:7050", "type": "string" },
-    { "key": "token", "value": "", "type": "string" },
-    { "key": "customerId", "value": "", "type": "string" },
-    { "key": "customerRowVersion", "value": "", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "https://localhost:7050",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerRowVersion",
+      "value": "",
+      "type": "string"
+    }
   ],
   "item": [
     {
@@ -36,8 +61,10 @@
                   "if (pm.response.code === 200) {",
                   "    const body = pm.response.json();",
                   "    pm.collectionVariables.set(\"token\", body.token);",
-                  "    pm.test(\"Token was saved to {{token}}\", function () {",
+                  "    pm.collectionVariables.set(\"refreshToken\", body.refreshToken);",
+                  "    pm.test(\"Access token và refresh token đã được lưu\", function () {",
                   "        pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
                   "    });",
                   "}"
                 ]
@@ -45,10 +72,15 @@
             }
           ],
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -56,35 +88,228 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
             },
-            "description": "Đăng nhập bằng tài khoản admin cứng đã seed. Trả 401 (ProblemDetails) nếu sai username HOẶC sai password — API cố tình không phân biệt 2 trường hợp để chống dò tài khoản (username enumeration). Rate limit: 5 request/phút/IP."
+            "description": "Đăng nhập bằng tài khoản admin đã seed (AdminSeed trong User Secrets). Trả về access token JWT (hết hạn sau 15 phút) và refresh token (7 ngày).\n\n- 401: sai username HOẶC sai password — API cố tình không phân biệt 2 trường hợp để chống dò tài khoản.\n- 423: tài khoản tạm khoá sau 5 lần sai liên tiếp (15 phút, cấu hình qua Security:MaxFailedLoginAttempts / Security:LockoutDurationMinutes).\n- 429: vượt rate limit Token Bucket 5 request/phút/IP."
           },
           "response": [
             {
               "name": "200 OK",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/auth/login" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/login"
+              },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"expiresAtUtc\": \"2026-09-15T14:30:00Z\",\n  \"username\": \"admin\"\n}"
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"expiresAtUtc\": \"2026-09-16T14:15:00Z\",\n  \"username\": \"admin\",\n  \"refreshToken\": \"q8Jk2m...base64-512-bit...Zx0=\"\n}"
             },
             {
               "name": "401 Unauthorized — sai username/password",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/auth/login" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/login"
+              },
               "status": "Unauthorized",
               "code": 401,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/problem+json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
               "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.1\",\n  \"title\": \"Invalid credentials\",\n  \"status\": 401,\n  \"detail\": \"Tên đăng nhập hoặc mật khẩu không đúng.\",\n  \"traceId\": \"00-...\"\n}"
             },
             {
+              "name": "423 Locked — tài khoản tạm khoá do sai nhiều lần",
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/login"
+              },
+              "status": "Locked",
+              "code": 423,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
+              "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc4918#section-11.3\",\n  \"title\": \"Account locked\",\n  \"status\": 423,\n  \"detail\": \"Tài khoản tạm khoá do đăng nhập sai nhiều lần. Vui lòng thử lại sau 15 phút.\",\n  \"traceId\": \"00-...\"\n}"
+            },
+            {
               "name": "429 Too Many Requests — vượt rate limit",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/auth/login" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/login"
+              },
               "status": "Too Many Requests",
               "code": 429,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Refresh token (lấy access token mới)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set(\"token\", body.token);",
+                  "    pm.collectionVariables.set(\"refreshToken\", body.refreshToken);",
+                  "    pm.test(\"Access token và refresh token đã được lưu\", function () {",
+                  "        pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Đổi refresh token lấy access token mới (Blazor tự gọi endpoint này ~2 phút trước khi access token hết hạn — SilentRefreshScheduler).\n\nRotation: mỗi lần gọi thành công, refresh token cũ bị thu hồi và một refresh token mới được cấp (script Tests tự lưu lại). Gửi lại refresh token cũ (replay) → 401. DB chỉ lưu SHA-256 hash của refresh token. Áp dụng chung rate limit với Login."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/refresh"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"expiresAtUtc\": \"2026-09-16T14:15:00Z\",\n  \"username\": \"admin\",\n  \"refreshToken\": \"q8Jk2m...base64-512-bit...Zx0=\"\n}"
+            },
+            {
+              "name": "401 Unauthorized — refresh token hết hạn/đã thu hồi/đã dùng",
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/refresh"
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
+              "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7235#section-3.1\",\n  \"title\": \"Invalid refresh token\",\n  \"status\": 401,\n  \"detail\": \"Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.\",\n  \"traceId\": \"00-...\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Logout (thu hồi refresh token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set(\"token\", \"\");",
+                  "pm.collectionVariables.set(\"refreshToken\", \"\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Thu hồi refresh token phía server. Access token JWT là stateless nên không thu hồi được — nó tự hết hạn trong tối đa 15 phút. Script Tests xoá {{token}} và {{refreshToken}} trong collection."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/auth/logout"
+              },
+              "status": "No Content",
+              "code": 204,
               "_postman_previewlanguage": "json",
               "header": [],
               "body": ""
@@ -103,16 +328,47 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/customers?pageNumber=1&pageSize=10&fullName=&phoneNumber=&isActive=&sortBy=createdAt&sortDirection=desc",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "customers"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ],
               "query": [
-                { "key": "pageNumber", "value": "1" },
-                { "key": "pageSize", "value": "10" },
-                { "key": "fullName", "value": "", "description": "Tìm theo Họ và tên (Contains, không phân biệt hoa thường tùy collation DB)" },
-                { "key": "phoneNumber", "value": "", "description": "Tìm theo Số điện thoại (Contains)" },
-                { "key": "isActive", "value": "", "description": "true/false — lọc theo trạng thái hoạt động" },
-                { "key": "sortBy", "value": "createdAt", "description": "fullName | customerCode | createdAt" },
-                { "key": "sortDirection", "value": "desc", "description": "asc | desc" }
+                {
+                  "key": "pageNumber",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                },
+                {
+                  "key": "fullName",
+                  "value": "",
+                  "description": "Tìm theo Họ và tên (Contains, không phân biệt hoa thường tùy collation DB)"
+                },
+                {
+                  "key": "phoneNumber",
+                  "value": "",
+                  "description": "Tìm theo Số điện thoại (Contains)"
+                },
+                {
+                  "key": "isActive",
+                  "value": "",
+                  "description": "true/false — lọc theo trạng thái hoạt động"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "createdAt",
+                  "description": "fullName | customerCode | createdAt"
+                },
+                {
+                  "key": "sortDirection",
+                  "value": "desc",
+                  "description": "asc | desc"
+                }
               ]
             },
             "description": "Global Query Filter tự loại các khách hàng đã xóa mềm (IsDeleted=true). pageSize tối đa 100 (tự động clamp)."
@@ -120,11 +376,19 @@
           "response": [
             {
               "name": "200 OK",
-              "originalRequest": { "method": "GET", "url": "{{baseUrl}}/api/customers" },
+              "originalRequest": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/customers"
+              },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": "{\n  \"items\": [\n    {\n      \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n      \"customerCode\": \"KH-0001\",\n      \"fullName\": \"Nguyễn Văn A\",\n      \"email\": \"nguyen.van.a@example.com\",\n      \"phoneNumber\": \"0901234567\",\n      \"isActive\": true\n    }\n  ],\n  \"pageNumber\": 1,\n  \"pageSize\": 10,\n  \"totalCount\": 1\n}"
             }
           ]
@@ -136,29 +400,85 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/customers/{{customerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "customers", "{{customerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerId}}"
+              ]
             },
             "description": "{{customerId}} được tự động set sau khi chạy request \"Thêm mới khách hàng\" thành công."
           },
           "response": [
             {
               "name": "200 OK",
-              "originalRequest": { "method": "GET", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": "{\n  \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"customerCode\": \"KH-0001\",\n  \"fullName\": \"Nguyễn Văn A\",\n  \"email\": \"nguyen.van.a@example.com\",\n  \"phoneNumber\": \"0901234567\",\n  \"dateOfBirth\": \"1990-01-01\",\n  \"isActive\": true,\n  \"createdAt\": \"2026-09-15T10:00:00Z\",\n  \"createdBy\": \"admin\",\n  \"updatedAt\": null,\n  \"updatedBy\": null,\n  \"rowVersion\": \"AAAAAAAAB9E=\"\n}"
             },
             {
               "name": "404 Not Found",
-              "originalRequest": { "method": "GET", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "Not Found",
               "code": 404,
               "_postman_previewlanguage": "json",
               "header": [],
               "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Lịch sử thay đổi khách hàng (audit logs)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customerId}}/audit-logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerId}}",
+                "audit-logs"
+              ]
+            },
+            "description": "Trả về toàn bộ lịch sử Added/Modified/Deleted của 1 khách hàng, mới nhất trước. Được ghi tự động bởi AuditLogInterceptor (EF Core SaveChangesInterceptor): OldValues/NewValues là JSON chỉ chứa các field thực sự thay đổi; UserName lấy từ JWT claim. Xoá mềm được ghi là \"Deleted\" (không phải \"Modified\")."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}/audit-logs"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"action\": \"Deleted\",\n    \"oldValues\": \"{\\\"IsDeleted\\\":false}\",\n    \"newValues\": \"{\\\"IsDeleted\\\":true}\",\n    \"userName\": \"admin\",\n    \"timestamp\": \"2026-09-16T03:20:11Z\"\n  },\n  {\n    \"action\": \"Modified\",\n    \"oldValues\": \"{\\\"PhoneNumber\\\":\\\"0901234567\\\"}\",\n    \"newValues\": \"{\\\"PhoneNumber\\\":\\\"0987654321\\\"}\",\n    \"userName\": \"admin\",\n    \"timestamp\": \"2026-09-16T03:18:42Z\"\n  },\n  {\n    \"action\": \"Added\",\n    \"oldValues\": null,\n    \"newValues\": \"{\\\"CustomerCode\\\":\\\"KH-0001\\\",\\\"FullName\\\":\\\"Nguyễn Văn A\\\",\\\"Email\\\":\\\"nguyen.van.a@example.com\\\",\\\"PhoneNumber\\\":\\\"0901234567\\\",\\\"IsActive\\\":true}\",\n    \"userName\": \"admin\",\n    \"timestamp\": \"2026-09-16T03:15:05Z\"\n  }\n]"
             }
           ]
         },
@@ -189,7 +509,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -197,40 +520,70 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/customers",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "customers"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
             },
             "description": "CustomerCode KHÔNG được gửi lên — server tự sinh (KH-0001, KH-0002, ...). Trả 400 ProblemDetails nếu validation lỗi (email sai định dạng, SĐT không đúng ^0\\d{9}$, ngày sinh không hợp lệ...), 409 nếu Email đã tồn tại."
           },
           "response": [
             {
               "name": "201 Created",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/customers" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/customers"
+              },
               "status": "Created",
               "code": 201,
               "_postman_previewlanguage": "json",
               "header": [
-                { "key": "Content-Type", "value": "application/json" },
-                { "key": "Location", "value": "/api/customers/3fa85f64-5717-4562-b3fc-2c963f66afa6" }
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Location",
+                  "value": "/api/customers/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
               ],
               "body": "{\n  \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"customerCode\": \"KH-0001\",\n  \"fullName\": \"Nguyễn Văn A\",\n  \"email\": \"nguyen.van.a@example.com\",\n  \"phoneNumber\": \"0901234567\",\n  \"dateOfBirth\": \"1990-01-01\",\n  \"isActive\": true,\n  \"createdAt\": \"2026-09-15T10:00:00Z\",\n  \"createdBy\": \"admin\",\n  \"updatedAt\": null,\n  \"updatedBy\": null,\n  \"rowVersion\": \"AAAAAAAAB9E=\"\n}"
             },
             {
               "name": "400 Bad Request — validation lỗi",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/customers" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/customers"
+              },
               "status": "Bad Request",
               "code": 400,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/problem+json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
               "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.1\",\n  \"title\": \"One or more validation errors occurred.\",\n  \"status\": 400,\n  \"errors\": {\n    \"PhoneNumber\": [\"Số điện thoại phải gồm 10 chữ số và bắt đầu bằng 0.\"]\n  },\n  \"traceId\": \"00-...\"\n}"
             },
             {
               "name": "409 Conflict — Email đã tồn tại",
-              "originalRequest": { "method": "POST", "url": "{{baseUrl}}/api/customers" },
+              "originalRequest": {
+                "method": "POST",
+                "url": "{{baseUrl}}/api/customers"
+              },
               "status": "Conflict",
               "code": 409,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/problem+json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
               "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.8\",\n  \"title\": \"Conflict\",\n  \"status\": 409,\n  \"detail\": \"Email 'nguyen.van.a@example.com' đã được sử dụng bởi khách hàng khác.\",\n  \"traceId\": \"00-...\"\n}"
             }
           ]
@@ -240,7 +593,10 @@
           "request": {
             "method": "PUT",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -248,33 +604,58 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/customers/{{customerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "customers", "{{customerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerId}}"
+              ]
             },
             "description": "rowVersion PHẢI là giá trị mới nhất lấy từ GET chi tiết hoặc từ response Create — nếu lệch (người khác đã sửa trước đó), API trả 409 Conflict thay vì ghi đè âm thầm (optimistic concurrency)."
           },
           "response": [
             {
               "name": "200 OK",
-              "originalRequest": { "method": "PUT", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "PUT",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
               "body": "{\n  \"id\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n  \"customerCode\": \"KH-0001\",\n  \"fullName\": \"Nguyễn Văn A (đã cập nhật)\",\n  \"email\": \"nguyen.van.a@example.com\",\n  \"phoneNumber\": \"0901234567\",\n  \"dateOfBirth\": \"1990-01-01\",\n  \"isActive\": true,\n  \"createdAt\": \"2026-09-15T10:00:00Z\",\n  \"createdBy\": \"admin\",\n  \"updatedAt\": \"2026-09-15T10:05:00Z\",\n  \"updatedBy\": \"admin\",\n  \"rowVersion\": \"AAAAAAAAB9I=\"\n}"
             },
             {
               "name": "409 Conflict — RowVersion lệch (đã bị sửa bởi người khác)",
-              "originalRequest": { "method": "PUT", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "PUT",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "Conflict",
               "code": 409,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/problem+json" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/problem+json"
+                }
+              ],
               "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.8\",\n  \"title\": \"Conflict\",\n  \"status\": 409,\n  \"detail\": \"Dữ liệu khách hàng đã được người khác cập nhật. Vui lòng tải lại trang.\",\n  \"traceId\": \"00-...\"\n}"
             },
             {
               "name": "404 Not Found",
-              "originalRequest": { "method": "PUT", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "PUT",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "Not Found",
               "code": 404,
               "_postman_previewlanguage": "json",
@@ -290,15 +671,24 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/customers/{{customerId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "customers", "{{customerId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerId}}"
+              ]
             },
             "description": "Không xóa vật lý — SoftDeleteAndAuditInterceptor tự động chuyển thành UPDATE IsDeleted=1. Sau khi xóa, khách hàng biến mất khỏi GET /api/customers (Global Query Filter) nhưng vẫn còn trong DB."
           },
           "response": [
             {
               "name": "204 No Content",
-              "originalRequest": { "method": "DELETE", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "DELETE",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "No Content",
               "code": 204,
               "_postman_previewlanguage": "text",
@@ -307,7 +697,10 @@
             },
             {
               "name": "404 Not Found",
-              "originalRequest": { "method": "DELETE", "url": "{{baseUrl}}/api/customers/{{customerId}}" },
+              "originalRequest": {
+                "method": "DELETE",
+                "url": "{{baseUrl}}/api/customers/{{customerId}}"
+              },
               "status": "Not Found",
               "code": 404,
               "_postman_previewlanguage": "json",

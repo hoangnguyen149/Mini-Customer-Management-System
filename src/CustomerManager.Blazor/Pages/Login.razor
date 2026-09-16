@@ -107,11 +107,32 @@
             await JsRuntime.InvokeVoidAsync("localStorage.removeItem", RememberedUsernameKey);
         }
 
-        Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl);
+        Navigation.NavigateTo(SanitizeReturnUrl(ReturnUrl));
     }
 
     private void ShowForgotPasswordInfo() =>
         Snackbar.Add("Vui lòng liên hệ quản trị viên hệ thống để được đặt lại mật khẩu.", Severity.Info);
+
+    // Only ever navigate to a same-app relative path. A bare ReturnUrl (e.g.
+    // "/login?returnUrl=https://evil.example/login") would send the admin to an
+    // attacker-controlled page immediately after a successful login — a classic
+    // post-login phishing redirect (Issue M4). "//evil.example" and
+    // "/\evil.example" are also rejected: browsers treat both as protocol-
+    // relative, i.e. an off-app redirect, despite starting with "/".
+    private static string SanitizeReturnUrl(string? returnUrl)
+    {
+        if (string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith('/'))
+        {
+            return "/";
+        }
+
+        if (returnUrl.StartsWith("//") || returnUrl.StartsWith("/\\"))
+        {
+            return "/";
+        }
+
+        return returnUrl;
+    }
 
     private class LoginFormModel
     {

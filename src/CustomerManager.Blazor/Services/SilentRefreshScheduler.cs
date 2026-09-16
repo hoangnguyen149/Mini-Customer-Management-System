@@ -72,7 +72,7 @@ public class SilentRefreshScheduler : IDisposable
 
         try
         {
-            var client = _httpClientFactory.CreateClient("CustomerManagerApi");
+            var client = _httpClientFactory.CreateClient("CustomerManagerApiRaw");
             var response = await client.PostAsJsonAsync(
                 "api/auth/refresh",
                 new RefreshTokenRequest { RefreshToken = _tokenProvider.RefreshToken },

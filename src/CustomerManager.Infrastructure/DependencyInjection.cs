@@ -38,6 +38,7 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+        services.AddScoped<ICustomerCodeGenerator, SqlSequenceCustomerCodeGenerator>();
 
         services.AddScoped<IPasswordHasherService, PasswordHasherService>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
@@ -45,6 +46,8 @@ public static class DependencyInjection
         // Runs once at startup — see AdminUserSeeder for why this replaces both a
         // Users-management UI and a migration-based seed.
         services.AddHostedService<AdminUserSeeder>();
+
+        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
         return services;
     }

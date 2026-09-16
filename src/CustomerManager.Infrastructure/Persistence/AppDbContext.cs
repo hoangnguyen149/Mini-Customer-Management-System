@@ -27,6 +27,13 @@ public class AppDbContext : DbContext, IApplicationDbContext
         // Explicit reporting/restore scenarios can opt out with IgnoreQueryFilters().
         modelBuilder.Entity<Customer>().HasQueryFilter(c => !c.IsDeleted);
 
+        // Backs SqlSequenceCustomerCodeGenerator. A DB sequence (not "read the max
+        // existing CustomerCode and add one") is what actually guarantees
+        // uniqueness under concurrent creates, and never runs out: formatting a
+        // number past 9999 just widens to more digits instead of colliding with an
+        // earlier code the way string-ordering comparison used to (Issue M2).
+        modelBuilder.HasSequence<int>("CustomerCodeSequence", "dbo").StartsAt(1).IncrementsBy(1);
+
         base.OnModelCreating(modelBuilder);
     }
 }
