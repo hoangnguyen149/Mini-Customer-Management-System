@@ -5,30 +5,33 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
-<MudGrid Class="mb-2">
-    <MudItem xs="12" md="8">
-        <MudStack Spacing="1" Justify="Justify.Center" Class="h-100">
-            <MudText Typo="Typo.h4">@Greeting, @(_userName ?? "Administrator")</MudText>
-            <MudText Typo="Typo.h5" Color="Color.Primary">CEP Customer Management</MudText>
-            <MudText Typo="Typo.body1" Color="Color.Secondary">
-                Quản lý thông tin khách hàng nhanh chóng, chính xác và an toàn.
-            </MudText>
-            <MudStack Row="true" Spacing="2" Class="mt-2">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Groups"
-                          OnClick="@(() => Navigation.NavigateTo("/customers"))">
-                    Xem khách hàng
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
-                          OnClick="OpenAddCustomerAsync">
-                    Thêm khách hàng
-                </MudButton>
+<PageHeader Icon="@Icons.Material.Filled.Dashboard" Title="Dashboard" Subtitle="Tổng quan hệ thống quản lý khách hàng" />
+
+<MudPaper Class="dash-hero pa-6 mb-6" Elevation="0">
+    <MudGrid>
+        <MudItem xs="12" md="8">
+            <MudStack Spacing="1" Justify="Justify.Center" Class="h-100">
+                <MudText Typo="Typo.h4">@Greeting, @(_userName ?? "Administrator")</MudText>
+                <MudText Typo="Typo.body1" Style="opacity:.9;">
+                    Quản lý thông tin khách hàng nhanh chóng, chính xác và an toàn.
+                </MudText>
+                <MudStack Row="true" Spacing="2" Class="mt-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Groups"
+                              OnClick="@(() => Navigation.NavigateTo("/customers"))">
+                        Xem khách hàng
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                              OnClick="OpenAddCustomerAsync">
+                        Thêm khách hàng
+                    </MudButton>
+                </MudStack>
             </MudStack>
-        </MudStack>
-    </MudItem>
-    <MudItem xs="12" md="4" Class="d-none d-md-flex justify-center align-center">
-        <CommunityVisual />
-    </MudItem>
-</MudGrid>
+        </MudItem>
+        <MudItem xs="12" md="4" Class="d-none d-md-flex justify-center align-center on-brand-panel">
+            <CommunityVisual />
+        </MudItem>
+    </MudGrid>
+</MudPaper>
 
 <MudGrid>
     <MudItem xs="12" sm="6" md="3">

@@ -7,6 +7,27 @@
     <title>CustomerManager</title>
     <base href="/" />
 
+    <!-- Sets html[data-theme] before first paint, so a reload while in dark
+         mode never flashes light while the WASM runtime (and with it,
+         ThemeService/theme.js) is still loading. Deliberately self-contained
+         — it cannot depend on js/theme.js, an external script that hasn't
+         loaded yet at this point — and reads the exact same localStorage key
+         ThemeService.cs uses ("customermanager-theme"); if that key ever
+         changes, update it here too. -->
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem('customermanager-theme');
+                var isDark = stored
+                    ? stored === 'dark'
+                    : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+            } catch (e) {
+                document.documentElement.dataset.theme = 'light';
+            }
+        })();
+    </script>
+
     <link href="css/app.css" rel="stylesheet" />
     <link href="CustomerManager.Blazor.styles.css" rel="stylesheet" />
 
@@ -31,6 +52,8 @@
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="js/commandPalette.js"></script>
+    <script src="js/fileDownload.js"></script>
+    <script src="js/theme.js"></script>
 </body>
 
 </html>

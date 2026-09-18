@@ -1,0 +1,24 @@
+@* Every MudBlazor app-level provider (theme, popovers, dialogs, snackbars)
+   lives here exactly once, so both MainLayout and AuthLayout render it
+   instead of each declaring its own copy — a second MudThemeProvider/
+   MudDialogProvider instance per page is a real MudBlazor foot-gun (duplicate
+   overlays, theme flicker), not just repetition. *@
+@implements IDisposable
+@inject ThemeService ThemeService
+
+<MudThemeProvider Theme="AppTheme.Default" IsDarkMode="ThemeService.IsDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
+<MudSnackbarProvider />
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        ThemeService.OnChange += HandleThemeChanged;
+        await ThemeService.InitializeAsync();
+    }
+
+    private void HandleThemeChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => ThemeService.OnChange -= HandleThemeChanged;
+}

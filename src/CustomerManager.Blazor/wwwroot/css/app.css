@@ -33,35 +33,239 @@ html, body {
 
 /* ---------------------------------------------------------------------------
    Design tokens — shared by every component instead of hard-coded values.
-   MudBlazor colors come from Theme/AppTheme.cs; these cover things MudBlazor
-   doesn't expose a C# API for (radii/shadow scale, transition timing).
+   Colors/typography live in Theme/AppTheme.cs (C#, --mud-palette-*/--mud-
+   typography-* at runtime); these --app-* tokens cover the rest: radius/
+   shadow scale, border color, focus ring, transition timing. Redefined for
+   dark mode via html[data-theme="dark"] — see index.html's pre-paint inline
+   script and ThemeService for how that attribute gets set; it has to be an
+   attribute selector, not a runtime CSS variable swap, because MudThemeProvider
+   injects its own :root { --mud-palette-* } block at runtime *after* this
+   stylesheet loads, and app.css needs to stay in sync with light/dark without
+   waiting on that injection.
 --------------------------------------------------------------------------- */
 :root {
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
-    --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.12);
-    --transition-fast: 150ms ease;
-    --transition-normal: 250ms ease;
+    --app-radius-sm: 8px;
+    --app-radius-md: 10px;
+    --app-radius-lg: 16px;
+    --app-border-color: color-mix(in srgb, var(--mud-palette-text-primary) 10%, transparent);
+    --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --app-shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+    --app-shadow-lg: 0 16px 32px rgba(15, 23, 42, 0.12);
+    --app-focus-ring: 0 0 0 3px color-mix(in srgb, var(--mud-palette-primary) 35%, transparent);
+    --app-transition-fast: 150ms ease;
+    --app-transition-normal: 250ms ease;
 }
 
-/* Subtle depth on KPI cards — soft shadow that lifts a little on hover, not a
-   full 3D tilt (keeps numbers easy to read, per "premium, not flashy"). */
-.stat-card {
-    border-radius: var(--radius-lg) !important;
-    box-shadow: var(--shadow-md) !important;
-    transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+html[data-theme="dark"] {
+    --app-border-color: color-mix(in srgb, var(--mud-palette-text-primary) 16%, transparent);
+    /* A drop shadow reads as a dim, slightly muddy smudge on a near-black
+       surface — barely visible and not worth the paint cost. Depth in dark
+       mode comes from --app-border-color above instead; these stay close to
+       inert rather than trying to fake a shadow that never reads correctly. */
+    --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --app-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+    --app-shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------------------------------------------------------------------------
+   Cards — every card in the app is a MudPaper at Elevation 1 or 2, so styling
+   those two classes restyles every card without touching markup. Dialogs use
+   Elevation 8 (MudDialogProvider default) and are unaffected.
+--------------------------------------------------------------------------- */
+.mud-paper.mud-elevation-1,
+.mud-paper.mud-elevation-2 {
+    border: 1px solid var(--app-border-color);
+    border-radius: var(--app-radius-lg);
+    box-shadow: var(--app-shadow-sm) !important;
+}
+
+.stat-card.stat-card.mud-elevation-1 {
+    box-shadow: var(--app-shadow-md) !important;
+    transition: transform var(--app-transition-normal), box-shadow var(--app-transition-normal);
 }
 
 .stat-card:hover {
     transform: translateY(-2px);
-    box-shadow: var(--shadow-lg) !important;
+    box-shadow: var(--app-shadow-lg) !important;
 }
 
-.mud-nav-link.active {
+.stat-card-icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: var(--app-radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: color-mix(in srgb, var(--stat-color) 14%, transparent);
+    color: var(--stat-color);
+}
+
+.stat-card-primary { --stat-color: var(--mud-palette-primary); }
+.stat-card-secondary { --stat-color: var(--mud-palette-secondary); }
+.stat-card-success { --stat-color: var(--mud-palette-success); }
+.stat-card-error { --stat-color: var(--mud-palette-error); }
+.stat-card-warning { --stat-color: var(--mud-palette-warning); }
+.stat-card-info { --stat-color: var(--mud-palette-info); }
+.stat-card-default { --stat-color: var(--mud-palette-text-secondary); }
+.stat-card-dark { --stat-color: var(--mud-palette-dark); }
+
+/* Dashboard hero — brand gradient card. .mud-paper is what sets `color` on
+   every card (see the block above and MudBlazor's own .mud-paper{color:...}
+   rule), so overriding it on plain .dash-hero would lose that fight; scoping
+   to .mud-paper.dash-hero (0,2,0) beats .mud-paper (0,1,0) regardless of
+   source order. */
+.mud-paper.dash-hero {
+    color: #fff;
+    background: linear-gradient(135deg, #002B80 0%, #003399 45%, #0E6E96 100%);
+    border: none;
+}
+
+html[data-theme="dark"] .mud-paper.dash-hero {
+    background: linear-gradient(135deg, #001A4D 0%, #001F5C 45%, #084A63 100%);
+}
+
+/* Buttons inside the hero sit on a dark gradient regardless of app theme —
+   the theme's Primary/Outlined button colors are tuned to sit on a light/dark
+   *surface*, not on top of themselves, and would sink into this background. */
+.dash-hero .mud-button-filled-primary,
+.dash-hero .mud-button-outlined-primary {
+    background-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.6);
+    color: #fff;
+}
+
+.dash-hero .mud-button-filled-primary:hover,
+.dash-hero .mud-button-outlined-primary:hover {
+    background-color: rgba(255, 255, 255, 0.26);
+}
+
+/* ---------------------------------------------------------------------------
+   Page header — Icon/Title/Subtitle/Actions, one real <h1> per page (App.razor
+   has <FocusOnNavigate Selector="h1" />, otherwise inert with no h1 anywhere).
+   MudBlazor's global reset zeroes h1 margin/padding, so nothing here needs an
+   explicit reset of its own.
+--------------------------------------------------------------------------- */
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+
+.page-header-icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: var(--app-radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: color-mix(in srgb, var(--mud-palette-primary) 12%, transparent);
+    color: var(--mud-palette-primary);
+}
+
+.page-header-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.page-header-title {
+    font-family: var(--mud-typography-h5-family);
+    font-size: var(--mud-typography-h5-size);
+    font-weight: var(--mud-typography-h5-weight);
+    line-height: var(--mud-typography-h5-lineheight);
+    color: var(--mud-palette-text-primary);
+}
+
+.page-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-left: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   App bar / drawer — translucent glass surfaces. Elevation is set to 0 in
+   markup (MudAppBar/MudDrawer Elevation="0"); the hairline border below is
+   what actually reads as "chrome" instead of the shadow that used to.
+--------------------------------------------------------------------------- */
+.mud-appbar {
+    background-color: color-mix(in srgb, var(--mud-palette-appbar-background) 88%, transparent) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--app-border-color);
+}
+
+.mud-drawer {
+    background-color: color-mix(in srgb, var(--mud-palette-drawer-background) 92%, transparent) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-right: 1px solid var(--app-border-color);
+}
+
+/* "Phiên an toàn" is a status pill, not an action — it must not visually
+   compete with the real buttons (search/theme/logout) next to it. Outlined +
+   small text instead of a filled chip. */
+.app-status-pill.app-status-pill {
+    font-size: 0.7rem;
     font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.85;
+}
+
+.app-user-block {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 4px;
+}
+
+.app-user-name {
+    line-height: 1.1;
+}
+
+.app-user-role {
+    line-height: 1.1;
+}
+
+/* Active nav item: tinted background (already applied by MudBlazor's own
+   .mud-nav-link.active rule, driven by --mud-palette-primary/-action-default-
+   hover — no need to re-fight that) plus a left accent bar, which is the part
+   that actually answers "where am I" at a glance instead of two same-hue
+   labels. ::before is a new property with no existing MudBlazor declaration
+   to lose to, but the selector is still kept at (0,5,0) — comfortably past
+   the (0,4,0) .mud-nav-link.active:not(.mud-nav-link-disabled) rule it sits
+   beside — so a future MudBlazor bump adding its own ::before can't
+   silently win back the slot. */
+.mud-drawer .mud-navmenu .mud-nav-link.active:not(.mud-nav-link-disabled) {
+    position: relative;
+}
+
+.mud-drawer .mud-navmenu .mud-nav-link.active:not(.mud-nav-link-disabled)::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background-color: var(--mud-palette-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Data grid header — small, uppercase, secondary-colored, so it reads as a
+   *label* over the data instead of another row of data. Needs to beat
+   MudBlazor's own .mud-table-root .mud-table-head .mud-table-cell (0,3,0).
+--------------------------------------------------------------------------- */
+.mud-data-grid .mud-table-root .mud-table-head .mud-table-cell {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mud-palette-text-secondary);
 }
 
 /* ---------------------------------------------------------------------------
@@ -81,23 +285,11 @@ body::before {
         radial-gradient(720px circle at 50% 105%, rgba(var(--mud-palette-info-rgb), 0.07), transparent 60%);
 }
 
-.mud-appbar {
-    background-color: color-mix(in srgb, var(--mud-palette-appbar-background) 88%, transparent) !important;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
-.mud-drawer {
-    background-color: color-mix(in srgb, var(--mud-palette-drawer-background) 92%, transparent) !important;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
 /* Page transition — a short fade on route change. MainLayout gives @Body's
    wrapper a @key of the current URL, so Blazor remounts the div on navigation
    and this animation replays. */
 .page-fade {
-    animation: page-fade-in var(--transition-normal);
+    animation: page-fade-in var(--app-transition-normal);
 }
 
 @keyframes page-fade-in {
@@ -120,7 +312,7 @@ body::before {
 .command-palette {
     width: 100%;
     max-width: 560px;
-    border-radius: var(--radius-lg) !important;
+    border-radius: var(--app-radius-lg) !important;
 }
 
 .command-palette-list {
@@ -136,6 +328,10 @@ body::before {
    Login page — full-viewport centered card, two equal-height columns (brand
    panel + form). No page-level scroll, no large stray whitespace.
 --------------------------------------------------------------------------- */
+.auth-shell {
+    min-height: 100vh;
+}
+
 .login-page {
     min-height: 100vh;
     width: 100%;
@@ -151,7 +347,7 @@ body::before {
     width: 100%;
     max-width: 880px;
     min-height: 560px;
-    border-radius: 16px !important;
+    border-radius: var(--app-radius-lg) !important;
     overflow: hidden;
 }
 
@@ -161,6 +357,16 @@ body::before {
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
+    /* .on-brand-panel turns CommunityVisual's strokes/fills white — nothing
+       ever set an actual background here, so it used to be white-on-white
+       (invisible) in light mode. Real brand gradient, navy -> teal, with a
+       darker variant for dark mode so the panel doesn't glow next to a
+       near-black surface. */
+    background: linear-gradient(160deg, #002B80 0%, #003399 42%, #0E6E96 100%);
+}
+
+html[data-theme="dark"] .login-brand-panel {
+    background: linear-gradient(160deg, #001A4D 0%, #001F5C 42%, #084A63 100%);
 }
 
 .login-brand-content {
@@ -242,7 +448,7 @@ body::before {
 /* Audit log diff view (CustomerDetail) — readable JSON, not a giant one-liner. */
 .audit-json {
     background: var(--mud-palette-background-gray, rgba(128, 128, 128, 0.08));
-    border-radius: var(--radius-sm);
+    border-radius: var(--app-radius-sm);
     padding: 0.5rem 0.75rem;
     font-size: 0.8rem;
     white-space: pre-wrap;
@@ -250,9 +456,18 @@ body::before {
     overflow-x: auto;
 }
 
-/* Community visual rendered on a colored brand panel (Login page) needs light
-   strokes/fills instead of the primary/secondary colors it uses elsewhere,
-   otherwise it disappears into a same-hue background. */
+/* CustomerDetail label/value pairs. */
+.detail-field-label {
+    display: block;
+}
+
+.detail-field-value {
+    display: block;
+}
+
+/* Community visual rendered on a colored brand panel (Login hero, Dashboard
+   hero) needs light strokes/fills instead of the primary/secondary colors it
+   uses elsewhere, otherwise it disappears into a same-hue background. */
 .on-brand-panel .community-nodes circle {
     fill: #ffffff;
     opacity: 0.9;
@@ -265,6 +480,27 @@ body::before {
 
 .on-brand-panel .community-links line {
     stroke: #ffffff;
+}
+
+/* Chrome/Edge paint their own opaque background on autofilled inputs
+   (:-webkit-autofill) — not a MudBlazor/theme bug, and MudBlazor has no API
+   to neutralize it. Chrome *animates* that background in, so a merely-long
+   transition still eventually finishes and the white flashes back; making it
+   effectively infinite (166+ hours) is the standard workaround so the
+   fill-transition animation simply never completes. background-clip:text is
+   deliberately not used here — it breaks the caret. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--mud-palette-text-primary) !important;
+    caret-color: var(--mud-palette-text-primary);
+    transition: background-color 600000s 0s, color 600000s 0s !important;
+}
+
+input:autofill {
+    background-color: transparent !important;
+    color: var(--mud-palette-text-primary) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

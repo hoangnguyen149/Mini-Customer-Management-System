@@ -1,0 +1,15 @@
+@* Layout for pages that must never be able to render inside the authenticated
+   app shell (MainLayout) — currently just /login. MainLayout's shell used to
+   be reachable any time a visitor held a still-valid token (Back button right
+   after logging in, or typing /login directly) because Login.razor had no
+   @layout of its own and fell back to MainLayout's [Authorized] branch, which
+   rendered the full sidebar/app bar/logout button *around* the login form.
+   Giving /login a dedicated layout with no AuthorizeView at all makes that
+   structurally impossible instead of relying on auth state updating in time. *@
+@inherits LayoutComponentBase
+
+<AppProviders />
+
+<div class="auth-shell">
+    @Body
+</div>

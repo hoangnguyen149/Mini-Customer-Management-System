@@ -1,0 +1,291 @@
+@inject ICustomerImportApiService ImportApiService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Style="min-width: 600px; max-width: 900px;" Spacing="3">
+            @if (_step == ImportStep.SelectFile)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                    Chọn file Excel (.xlsx) hoặc CSV (.csv) chứa danh sách khách hàng theo mẫu bên dưới.
+                    Hệ thống sẽ hiển thị bản xem trước trước khi ghi vào cơ sở dữ liệu.
+                </MudText>
+
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudFileUpload T="IBrowserFile" FilesChanged="OnFileChanged" Accept=".xlsx,.csv">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.UploadFile">
+                                Choose File
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadTemplateAsync">
+                        Download Template
+                    </MudButton>
+                </MudStack>
+
+                @if (_selectedFile is not null)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        Đã chọn: <strong>@_selectedFile.Name</strong> (@FormatSize(_selectedFile.Size))
+                    </MudAlert>
+                }
+
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Hỗ trợ: .xlsx, .csv</MudText>
+
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">@_errorMessage</MudAlert>
+                }
+            }
+            else if (_step == ImportStep.Preview && _previewResponse is not null)
+            {
+                <MudGrid>
+                    <MudItem xs="6" sm="3"><StatCard Icon="@Icons.Material.Filled.Summarize" Label="Tổng số dòng" Value="@_previewResponse.TotalRows" Color="Color.Default" /></MudItem>
+                    <MudItem xs="6" sm="3"><StatCard Icon="@Icons.Material.Filled.CheckCircleOutline" Label="Hợp lệ" Value="@_previewResponse.ValidRows" Color="Color.Success" /></MudItem>
+                    <MudItem xs="6" sm="3"><StatCard Icon="@Icons.Material.Filled.ErrorOutline" Label="Lỗi" Value="@_previewResponse.InvalidRows" Color="Color.Error" /></MudItem>
+                    <MudItem xs="6" sm="3"><StatCard Icon="@Icons.Material.Filled.ContentCopy" Label="Trùng lặp" Value="@_previewResponse.DuplicateRows" Color="Color.Warning" /></MudItem>
+                </MudGrid>
+
+                @if (_previewResponse.InvalidRows > 0 || _previewResponse.DuplicateRows > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true">
+                        Còn dòng lỗi/trùng lặp — vui lòng sửa file nguồn và tải lại trước khi import.
+                        Import chỉ thực hiện khi toàn bộ dữ liệu hợp lệ (all-or-nothing).
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="DownloadErrorReportAsync" Class="ml-2">
+                            Download Error Report
+                        </MudButton>
+                    </MudAlert>
+                }
+
+                <MudDataGrid T="ImportRowResult" Items="@_previewResponse.Rows" RowsPerPage="10" Dense="true" Hover="true"
+                             Height="360px" FixedHeader="true" SortMode="SortMode.None" Filterable="false">
+                    <Columns>
+                        <PropertyColumn Property="x => x.RowNumber" Title="#" />
+                        <PropertyColumn Property="x => x.FullName" Title="Họ tên" />
+                        <PropertyColumn Property="x => x.Email" Title="Email" />
+                        <PropertyColumn Property="x => x.PhoneNumber" Title="SĐT" />
+                        <PropertyColumn Property="x => x.DateOfBirthRaw" Title="Ngày sinh" />
+                        <TemplateColumn Title="Trạng thái">
+                            <CellTemplate>
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)" Variant="Variant.Filled">
+                                    @StatusLabel(context.Item.Status)
+                                </MudChip>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Lỗi" Sortable="false">
+                            <CellTemplate>
+                                @if (context.Item.Errors.Count > 0)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@string.Join(" | ", context.Item.Errors)</MudText>
+                                }
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <PagerContent>
+                        <MudDataGridPager T="ImportRowResult" />
+                    </PagerContent>
+                </MudDataGrid>
+
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">@_errorMessage</MudAlert>
+                }
+            }
+            else if (_step == ImportStep.Result)
+            {
+                <MudStack AlignItems="AlignItems.Center" Class="pa-6" Spacing="2">
+                    <MudIcon Icon="@(_confirmResponse?.Success == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.ErrorOutline)"
+                             Color="@(_confirmResponse?.Success == true ? Color.Success : Color.Error)" Size="Size.Large" />
+                    <MudText Typo="Typo.h6">
+                        @(_confirmResponse?.Success == true ? "Import completed successfully." : "Import failed.")
+                    </MudText>
+                    @if (_confirmResponse is not null)
+                    {
+                        <MudText Typo="Typo.body2">Total: @_confirmResponse.TotalRows</MudText>
+                        <MudText Typo="Typo.body2">Imported: @_confirmResponse.ImportedRows</MudText>
+                        <MudText Typo="Typo.body2">Failed: @_confirmResponse.FailedRows</MudText>
+                    }
+                    else if (!string.IsNullOrEmpty(_errorMessage))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Error">@_errorMessage</MudText>
+                        <MudText Typo="Typo.body2">No data was imported.</MudText>
+                    }
+                </MudStack>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        @if (_step == ImportStep.SelectFile)
+        {
+            <MudButton OnClick="Cancel">Cancel</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_selectedFile is null || _isBusy)" OnClick="PreviewAsync">
+                @if (_isBusy)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Preview Import
+            </MudButton>
+        }
+        else if (_step == ImportStep.Preview)
+        {
+            <MudButton OnClick="BackToSelect">Back</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                       Disabled="@(_isBusy || _previewResponse is null || _previewResponse.InvalidRows > 0 || _previewResponse.DuplicateRows > 0)"
+                       OnClick="ConfirmImportAsync">
+                @if (_isBusy)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Import Customers
+            </MudButton>
+        }
+        else
+        {
+            @if (_confirmResponse?.Success != true)
+            {
+                <MudButton OnClick="BackToSelect">Thử lại</MudButton>
+            }
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => CloseDialog(_confirmResponse?.Success == true))">
+                Đóng
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private enum ImportStep { SelectFile, Preview, Result }
+
+    private ImportStep _step = ImportStep.SelectFile;
+    private IBrowserFile? _selectedFile;
+    private bool _isBusy;
+    private string? _errorMessage;
+    private ImportPreviewResponse? _previewResponse;
+    private ImportConfirmResponse? _confirmResponse;
+
+    private void OnFileChanged(IBrowserFile file)
+    {
+        _selectedFile = file;
+        _errorMessage = null;
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        try
+        {
+            await ImportApiService.DownloadTemplateAsync();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (_selectedFile is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        try
+        {
+            _previewResponse = await ImportApiService.PreviewAsync(_selectedFile);
+            _step = ImportStep.Preview;
+        }
+        catch (ApiException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ConfirmImportAsync()
+    {
+        if (_previewResponse is null)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        try
+        {
+            _confirmResponse = await ImportApiService.ConfirmAsync(_previewResponse.ImportSessionId);
+            _errorMessage = null;
+            _step = ImportStep.Result;
+        }
+        catch (ApiException ex)
+        {
+            // All-or-nothing: the server rejected the whole batch (e.g. data
+            // changed since Preview) — nothing was written. Show the same
+            // "Import failed" result screen instead of a Snackbar, matching
+            // the all-or-nothing UX for the file-level Preview error case.
+            _confirmResponse = null;
+            _errorMessage = ex.Message;
+            _step = ImportStep.Result;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task DownloadErrorReportAsync()
+    {
+        if (_previewResponse is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await ImportApiService.DownloadErrorReportAsync(_previewResponse.ImportSessionId);
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private void BackToSelect()
+    {
+        _step = ImportStep.SelectFile;
+        _selectedFile = null;
+        _previewResponse = null;
+        _confirmResponse = null;
+        _errorMessage = null;
+    }
+
+    private void CloseDialog(bool success) => MudDialog.Close(DialogResult.Ok(success));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private static Color StatusColor(ImportRowStatus status) => status switch
+    {
+        ImportRowStatus.Valid => Color.Success,
+        ImportRowStatus.Invalid => Color.Error,
+        ImportRowStatus.DuplicateInFile => Color.Warning,
+        ImportRowStatus.DuplicateInDatabase => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string StatusLabel(ImportRowStatus status) => status switch
+    {
+        ImportRowStatus.Valid => "Hợp lệ",
+        ImportRowStatus.Invalid => "Lỗi",
+        ImportRowStatus.DuplicateInFile => "Trùng trong file",
+        ImportRowStatus.DuplicateInDatabase => "Đã tồn tại",
+        _ => status.ToString()
+    };
+
+    private static string FormatSize(long bytes) => bytes < 1024 * 1024
+        ? $"{bytes / 1024.0:0.#} KB"
+        : $"{bytes / 1024.0 / 1024.0:0.#} MB";
+}

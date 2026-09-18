@@ -3,6 +3,25 @@
 @code {
     protected override void OnInitialized()
     {
-        Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri))}");
+        // ToBaseRelativePath returns e.g. "customers/3f2a..." — no leading '/' —
+        // but Login.razor's SanitizeReturnUrl only ever accepts a path that
+        // *starts* with '/', so every deep link used to silently fail that
+        // check and fall back to "/" (Dashboard) after login. Prepending '/'
+        // here is what SanitizeReturnUrl expects; it still independently
+        // rejects "//" and "/\" (protocol-relative off-app redirects) — that
+        // check stays as the actual phishing guard, this fix only restores the
+        // normal case.
+        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var path = "/" + relativePath;
+
+        // No return path worth remembering (root) or we somehow got here for
+        // /login itself — just go straight to a plain login, no query string.
+        var target = string.IsNullOrEmpty(relativePath) || path.StartsWith("/login", StringComparison.OrdinalIgnoreCase)
+            ? "/login"
+            : $"/login?returnUrl={Uri.EscapeDataString(path)}";
+
+        // replace:true so Back from the login page doesn't land the user right
+        // back on the URL that just got them redirected here.
+        Navigation.NavigateTo(target, replace: true);
     }
 }

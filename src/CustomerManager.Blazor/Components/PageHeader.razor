@@ -1,0 +1,33 @@
+@* Consistent Icon/Title/Subtitle/Actions header for every page. Title renders
+   as a real <h1> — App.razor's <FocusOnNavigate Selector="h1" /> moves focus
+   there on route change (accessibility: screen readers/keyboard users land on
+   the new page's heading instead of silently staying wherever they were) —
+   until this component existed, no page had an actual h1, so that was inert. *@
+<div class="page-header">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <div class="page-header-icon">
+            <MudIcon Icon="@Icon" />
+        </div>
+    }
+    <div class="page-header-text">
+        <h1 class="page-header-title">@Title</h1>
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Subtitle</MudText>
+        }
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="page-header-actions">
+            @Actions
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

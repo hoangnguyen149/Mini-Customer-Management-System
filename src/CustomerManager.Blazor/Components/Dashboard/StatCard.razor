@@ -1,4 +1,4 @@
-<MudPaper Class="stat-card pa-4" Elevation="2">
+<MudPaper Class="@($"stat-card stat-card-{Color.ToString().ToLowerInvariant()} pa-4")" Elevation="1">
     <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Start">
         <MudStack Spacing="1">
             <MudText Typo="Typo.body2" Color="Color.Secondary">@Label</MudText>
@@ -11,9 +11,9 @@
                 <MudText Typo="Typo.h4">@_displayValue@Suffix</MudText>
             }
         </MudStack>
-        <MudAvatar Color="@Color" Variant="Variant.Filled">
+        <div class="stat-card-icon">
             <MudIcon Icon="@Icon" />
-        </MudAvatar>
+        </div>
     </MudStack>
 </MudPaper>
 

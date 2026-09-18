@@ -28,10 +28,10 @@
                     <MudIconButton Icon="@Icons.Material.Filled.FilterList" OnClick="@(() => _filterDrawerOpen = true)" />
                 </MudBadge>
             </MudTooltip>
-            <MudTooltip Text="Thêm khách hàng">
-                <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
-                              OnClick="OpenCreateDialogAsync" />
-            </MudTooltip>
+            <MudMenu Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" IconColor="Color.Inherit">
+                <MudMenuItem Icon="@Icons.Material.Filled.PersonAdd" OnClick="OpenCreateDialogAsync">Thêm khách hàng</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.UploadFile" OnClick="OpenImportDialogAsync">Import Excel/CSV</MudMenuItem>
+            </MudMenu>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -260,6 +260,19 @@
         if (result is { Canceled: false })
         {
             Snackbar.Add("Đã thêm khách hàng.", Severity.Success);
+            await ReloadGridAsync();
+        }
+    }
+
+    private async Task OpenImportDialogAsync()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await DialogService.ShowAsync<CustomerImportDialog>("Import Customers", options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: true })
+        {
+            Snackbar.Add("Đã import khách hàng thành công.", Severity.Success);
             await ReloadGridAsync();
         }
     }

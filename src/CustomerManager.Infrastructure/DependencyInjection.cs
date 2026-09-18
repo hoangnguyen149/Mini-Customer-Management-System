@@ -1,6 +1,7 @@
 using CustomerManager.Application.Interfaces;
 using CustomerManager.Infrastructure.Authentication;
 using CustomerManager.Infrastructure.Persistence;
+using CustomerManager.Infrastructure.Persistence.Imports;
 using CustomerManager.Infrastructure.Persistence.Interceptors;
 using CustomerManager.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +49,12 @@ public static class DependencyInjection
         services.AddHostedService<AdminUserSeeder>();
 
         services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
+
+        // Backs CustomerImportService's Preview->Confirm session cache — short
+        // lived, never persisted, holds parsed rows only, never raw file bytes.
+        services.AddMemoryCache();
+        services.AddScoped<ICustomerImportFileParser, ClosedXmlCsvCustomerImportFileParser>();
+        services.AddScoped<ICustomerImportWorkbookWriter, ClosedXmlCustomerImportWorkbookWriter>();
 
         return services;
     }

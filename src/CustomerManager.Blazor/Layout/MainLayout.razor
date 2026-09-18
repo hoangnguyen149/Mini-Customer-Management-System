@@ -1,87 +1,89 @@
 @inherits LayoutComponentBase
-@using CustomerManager.Blazor.Theme
 @implements IDisposable
 @inject ThemeService ThemeService
 @inject CommandPaletteService CommandPaletteService
 @inject TokenProvider TokenProvider
 
-<MudThemeProvider Theme="AppTheme.Default" IsDarkMode="ThemeService.IsDarkMode" />
-<MudPopoverProvider />
-<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
-<MudSnackbarProvider />
+<AppProviders />
 
-<AuthorizeView>
-    <Authorized>
-        <MudLayout>
-            <MudAppBar Elevation="2">
-                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                              OnClick="@(() => _drawerOpen = !_drawerOpen)" />
-                <MudText Typo="Typo.h6" Class="ml-2">CustomerManager</MudText>
-                <MudSpacer />
-                <MudTooltip Text="Tìm kiếm nhanh (Ctrl+K)">
-                    <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" OnClick="@(() => CommandPaletteService.Toggle())" />
-                </MudTooltip>
-                <MudTooltip Text="@(ThemeService.IsDarkMode ? "Chế độ sáng" : "Chế độ tối")">
-                    <MudIconButton Icon="@(ThemeService.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
-                                  Color="Color.Inherit" OnClick="@(() => ThemeService.ToggleAsync())" />
-                </MudTooltip>
-                @if (TokenProvider.HasValidToken)
-                {
-                    <MudChip T="string" Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Variant="Variant.Text" Size="Size.Small" Class="mx-1">
-                        Phiên an toàn
-                    </MudChip>
-                }
-                <MudChip T="string" Icon="@Icons.Material.Filled.Person" Color="Color.Default" Variant="Variant.Text" Class="mx-2">
-                    @context.User.Identity?.Name
-                </MudChip>
-                <MudButton Variant="Variant.Text" Color="Color.Inherit" StartIcon="@Icons.Material.Filled.Logout" OnClick="LogoutAsync">
-                    Đăng xuất
-                </MudButton>
-            </MudAppBar>
-
-            <MudDrawer @bind-Open="_drawerOpen" Elevation="1" Variant="DrawerVariant.Responsive" ClipMode="DrawerClipMode.Always">
-                <MudDrawerHeader>
+@* No AuthorizeView around the shell itself: routing is already protected two
+   layers deep (each page's own @attribute [Authorize], and App.razor's
+   AuthorizeRouteView -> RedirectToLogin for anything that fails it), and
+   /login now renders under AuthLayout instead of falling back to this layout
+   — so MainLayout only ever mounts for an authenticated route in the first
+   place. The one AuthorizeView left below is purely for `context.User`, not
+   for gating access. *@
+<MudLayout>
+    <MudAppBar Elevation="0">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                      OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <MudText Typo="Typo.h6" Class="ml-2">CustomerManager</MudText>
+        <MudSpacer />
+        <MudTooltip Text="Tìm kiếm nhanh (Ctrl+K)">
+            <MudIconButton Icon="@Icons.Material.Filled.Search" Color="Color.Inherit" OnClick="@(() => CommandPaletteService.Toggle())" />
+        </MudTooltip>
+        <MudTooltip Text="@(ThemeService.IsDarkMode ? "Chế độ sáng" : "Chế độ tối")">
+            <MudIconButton Icon="@(ThemeService.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                          Color="Color.Inherit" OnClick="@(() => ThemeService.ToggleAsync())" />
+        </MudTooltip>
+        @if (TokenProvider.HasValidToken)
+        {
+            <MudChip T="string" Icon="@Icons.Material.Filled.Lock" Color="Color.Success" Variant="Variant.Outlined" Size="Size.Small"
+                     Class="app-status-pill mx-1 d-none d-sm-flex">
+                Phiên an toàn
+            </MudChip>
+        }
+        <AuthorizeView>
+            <Authorized>
+                <div class="app-user-block d-none d-md-flex">
+                    <MudAvatar Color="Color.Primary" Size="Size.Small">
+                        @(context.User.Identity?.Name?.Length > 0 ? context.User.Identity!.Name![..1].ToUpperInvariant() : "?")
+                    </MudAvatar>
                     <MudStack Spacing="0">
-                        <MudText Typo="Typo.h6">CEP</MudText>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Customer Management</MudText>
-                    </MudStack>
-                </MudDrawerHeader>
-                <div class="d-flex flex-column" style="height: calc(100% - 64px);">
-                    <MudNavMenu>
-                        <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
-                        <MudNavLink Href="/customers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Khách hàng</MudNavLink>
-                    </MudNavMenu>
-                    <MudSpacer />
-                    <MudStack Class="pa-4" Spacing="1">
-                        <MudDivider Class="mb-2" />
-                        <MudText Typo="Typo.caption" Color="Color.Primary" Style="font-weight:700; letter-spacing:.5px;">
-                            VÌ LỢI ÍCH CỘNG ĐỒNG
-                        </MudText>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">35+ năm đồng hành cùng cộng đồng</MudText>
+                        <MudText Typo="Typo.body2" Class="app-user-name">@context.User.Identity?.Name</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="app-user-role">Quản trị viên</MudText>
                     </MudStack>
                 </div>
-            </MudDrawer>
+            </Authorized>
+        </AuthorizeView>
+        <MudButton Variant="Variant.Text" Color="Color.Inherit" StartIcon="@Icons.Material.Filled.Logout" OnClick="LogoutAsync" Class="d-none d-md-inline-flex">
+            Đăng xuất
+        </MudButton>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="LogoutAsync" Class="d-md-none" />
+    </MudAppBar>
 
-            <MudMainContent>
-                <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4 d-flex flex-column" Style="min-height: calc(100vh - 64px);">
-                    <div @key="_currentUri" class="page-fade flex-grow-1">
-                        @Body
-                    </div>
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Variant="DrawerVariant.Responsive" ClipMode="DrawerClipMode.Always">
+        <div class="d-flex flex-column" style="height: 100%;">
+            <MudNavMenu>
+                <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                <MudNavLink Href="/customers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Groups">Khách hàng</MudNavLink>
+            </MudNavMenu>
+            <MudSpacer />
+            <MudStack Class="pa-4" Spacing="1">
+                <MudDivider Class="mb-2" />
+                <MudText Typo="Typo.caption" Color="Color.Primary" Style="font-weight:700; letter-spacing:.5px;">
+                    VÌ LỢI ÍCH CỘNG ĐỒNG
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">35+ năm đồng hành cùng cộng đồng</MudText>
+            </MudStack>
+        </div>
+    </MudDrawer>
 
-                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="cep-footer pt-6 pb-2">
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">CEP Customer Management — Vì lợi ích cộng đồng</MudText>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">© 2026 CEP</MudText>
-                    </MudStack>
-                </MudContainer>
-            </MudMainContent>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4 d-flex flex-column" Style="min-height: calc(100vh - 64px);">
+            <div @key="_currentUri" class="page-fade flex-grow-1">
+                @Body
+            </div>
 
-            <CommandPalette />
-        </MudLayout>
-    </Authorized>
-    <NotAuthorized>
-        @Body
-    </NotAuthorized>
-</AuthorizeView>
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="cep-footer pt-6 pb-2">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">CEP Customer Management — Vì lợi ích cộng đồng</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">© 2026 CEP</MudText>
+            </MudStack>
+        </MudContainer>
+    </MudMainContent>
+
+    <CommandPalette />
+</MudLayout>
 
 @code {
     [Inject] private IAuthApiService AuthApiService { get; set; } = default!;

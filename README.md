@@ -4,7 +4,13 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 
 ## Tình trạng dự án
 
+<<<<<<< HEAD
 - Đã hoàn thành đầy đủ tính năng bắt buộc và cả 3 hạng mục Bonus của đề bài (MudBlazor, JWT, Git).
+=======
+- Toàn bộ solution **build thành công**, đã có sẵn **4 EF Core migration** và đã smoke-test end-to-end với SQL Server thật (login / refresh / logout / CRUD / import Excel/CSV / audit log / rate limit / security headers).
+- **51/51 unit test pass** (`dotnet test`).
+- Đã hoàn thành đầy đủ tính năng bắt buộc, cả 3 hạng mục Bonus của đề bài (MudBlazor, JWT, Git), và tính năng **Import khách hàng từ Excel/CSV**.
+>>>>>>> 4bf9576 (Update code)
 
 ## Tính năng
 
@@ -17,6 +23,7 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 **Bonus & mở rộng**
 
 - **MudBlazor:** `MudDataGrid` server-side, dialog Thêm/Sửa/Xoá, Dashboard KPI, trang chi tiết khách hàng, Filter Drawer, xoá hàng loạt, card view trên mobile, dark mode, Command Palette (`Ctrl+K`).
+- **Import khách hàng từ Excel/CSV:** chọn file → xem trước (preview, chưa ghi DB) → validate + phát hiện trùng (trong file lẫn với DB) → xác nhận → ghi hàng loạt an toàn (all-or-nothing). Xem chi tiết ở mục V.
 - **Xác thực JWT:** 1 tài khoản admin seed từ User Secrets; access token 15 phút + refresh token 7 ngày (xoay vòng, DB chỉ lưu SHA-256 hash), tự làm mới phiên ở Blazor; khoá tài khoản 15 phút sau 5 lần đăng nhập sai; rate limit 5 request/phút/IP cho login/refresh.
 - **Truy vết:** `CreatedBy/UpdatedBy` trên khách hàng + bảng `AuditLogs` lưu toàn bộ lịch sử thay đổi (giá trị cũ/mới dạng JSON), xem được trên UI.
 - **An toàn dữ liệu:** optimistic concurrency bằng `ROWVERSION` (409 khi 2 người cùng sửa), ProblemDetails (RFC 7807), security headers, HSTS, CORS whitelist, Output Cache có invalidate theo tag.
@@ -197,8 +204,84 @@ Mở `http://localhost:5100`, đăng nhập bằng tài khoản ở bước III.
 | POST | `/api/customers` | Bearer | Thêm mới — 201 / 400 / 409 (trùng Email) |
 | PUT | `/api/customers/{id}` | Bearer | Cập nhật, gửi kèm `rowVersion` — 200 / 400 / 404 / 409 (xung đột) |
 | DELETE | `/api/customers/{id}` | Bearer | Xoá mềm — 204 / 404 |
+| GET | `/api/customers/import/template` | Bearer | Tải file mẫu (.xlsx) để import |
+| POST | `/api/customers/import/preview` | Bearer | `multipart/form-data`, field `file` (.xlsx/.csv) — đọc + validate + phát hiện trùng, **chưa ghi DB**, trả về bản xem trước kèm `importSessionId` |
+| POST | `/api/customers/import/confirm` | Bearer | Body `{ "importSessionId": "..." }` — validate lại lần cuối rồi ghi hàng loạt (all-or-nothing) — 200 / 404 (session hết hạn) / 409 (dữ liệu đổi từ lúc preview) |
+| GET | `/api/customers/import/{sessionId}/error-report` | Bearer | Tải file `.xlsx` liệt kê các dòng lỗi/trùng của lần preview đó |
 
 Lỗi trả về dạng `application/problem+json` (RFC 7807). Swagger UI (chỉ bật ở Development) có sẵn nút **Authorize** để nhập Bearer token.
+
+### Import khách hàng từ Excel/CSV
+
+Nút **+ → Import Excel/CSV** trên trang `/customers` mở luồng: chọn file → xem
+trước (preview, chưa ghi DB) → xác nhận → ghi vào SQL Server. File gốc **không
+bao giờ được lưu xuống đĩa** — API chỉ đọc trực tiếp từ stream upload, kết quả
+đã parse/validate (không phải bytes file) được cache tạm trong bộ nhớ
+(`IMemoryCache`, mặc định 15 phút) để bước Confirm tham chiếu lại qua
+`importSessionId`, không phải gửi lại toàn bộ file hay toàn bộ JSON.
+
+**Định dạng file** — cột bắt buộc (đọc theo tên cột, không theo thứ tự,
+không phân biệt hoa/thường): `FullName | Email | PhoneNumber | DateOfBirth`
+(`dd/MM/yyyy`). Hỗ trợ `.xlsx` và `.csv` (UTF-8, tự dò dấu phân cách `,`/`;`).
+Không hỗ trợ `.xls` (định dạng nhị phân cũ) — mở lại bằng Excel và Save As
+sang `.xlsx`. Tải file mẫu qua nút **Download Template** hoặc
+`GET /api/customers/import/template`.
+
+> **Vì sao không có cột "Address" như đề bài mẫu ban đầu:** entity `Customer`
+> thực tế của hệ thống này không có trường `Address` — chỉ có `DateOfBirth`
+> (bắt buộc) và `IsActive`. Để không đổi database schema một cách không cần
+> thiết, template import dùng đúng 4 field bắt buộc hiện có của
+> `Customer.Create`/`CreateCustomerRequestValidator` thay vì thêm cột mới.
+> Khách hàng import luôn được tạo với `IsActive = true`.
+
+**Validation & trùng lặp** — mỗi dòng được chạy qua đúng
+`CreateCustomerRequestValidator` (FluentValidation) mà chức năng "Thêm khách
+hàng" đơn lẻ đang dùng, nên luật nghiệp vụ không bao giờ lệch giữa hai luồng.
+Trùng lặp được kiểm 2 lớp: **trong file** (theo email đã chuẩn hoá
+`Trim().ToLowerInvariant()`) và **với database** (1 query duy nhất, tự động
+bỏ qua khách hàng đã xoá mềm nhờ Global Query Filter — khớp filtered unique
+index `[IsDeleted] = 0` trên `Customers.Email`).
+
+**Transaction** — **all-or-nothing**: Confirm chỉ ghi khi toàn bộ các dòng
+còn lại đều hợp lệ (kể cả sau khi re-check email với DB lần nữa, vì dữ liệu
+có thể đổi giữa Preview và Confirm); nếu phát sinh xung đột mới, không dòng
+nào được ghi — API trả 409 kèm danh sách lỗi trong `ProblemDetails.Extensions`.
+Việc ghi hàng loạt dùng `AddRange` + **một** `SaveChangesAsync()` duy nhất
+(không lặp `Add()`+`SaveChangesAsync()` từng dòng) — `SoftDeleteAndAuditInterceptor`
+và `AuditLogInterceptor` hiện có vẫn tự stamp `CreatedBy/CreatedAt` và ghi
+`AuditLogs "Added"` cho từng khách hàng mới, vì cả hai chạy trên
+`ChangeTracker` tại thời điểm `SaveChanges`, không quan tâm entity được thêm
+bằng `Add` hay `AddRange`.
+
+**Giới hạn** (cấu hình qua `Import:*` trong `appsettings.json`, không hard-code):
+
+| Key | Mặc định | Ý nghĩa |
+|---|---|---|
+| `Import:MaxFileSizeBytes` | 5242880 (5 MB) | Kích thước file tối đa, chặn cả ở tầng multipart (`FormOptions`) lẫn trong `CustomerImportService` |
+| `Import:MaxRows` | 10000 | Số dòng dữ liệu tối đa, dừng đọc sớm nếu vượt |
+| `Import:SessionExpiryMinutes` | 15 | Thời gian cache kết quả Preview trước khi phải tải lại file |
+
+**Thư viện dùng cho đọc/ghi Excel/CSV** (đặt ở `CustomerManager.Infrastructure`,
+không vào `CustomerManager.Blazor` — Blazor chỉ upload file, không tự parse):
+
+| Package | Version | Mục đích |
+|---|---|---|
+| `ClosedXML` | 0.105.1 | Đọc `.xlsx` khi import, tạo file template + error report — MIT, miễn phí |
+| `CsvHelper` | 33.1.0 | Đọc `.csv` chuẩn RFC (quote, encoding, delimiter) — MIT/Apache, miễn phí |
+
+> **Bug đã sửa khi làm tính năng này (không thuộc phạm vi import, phát hiện
+> qua smoke-test với SQL Server thật):** `SqlSequenceCustomerCodeGenerator.NextAsync`
+> gọi `.SingleAsync()` trên kết quả `SqlQueryRaw<int>("SELECT NEXT VALUE FOR ...")`.
+> EF Core dịch `SingleAsync()`/`FirstAsync()` trên một raw-SQL query thành một
+> subquery bọc `TOP(n)` bên ngoài — và SQL Server không cho phép `NEXT VALUE FOR`
+> nằm trong subquery/derived table, nên **mọi lần tạo khách hàng (kể cả "Thêm
+> khách hàng" đơn lẻ có sẵn từ trước, không riêng import) đều 500 khi chạy với
+> SQL Server thật**, dù 34 unit test cũ vẫn pass (unit test dùng
+> `FakeCustomerCodeGenerator`, không đụng tới SQL thật nên chưa từng bắt được
+> lỗi này). Sửa bằng cách gọi `.ToListAsync()` rồi `.Single()` trong bộ nhớ,
+> tránh EF Core bọc subquery quanh raw SQL. Xem `SqlSequenceCustomerCodeGenerator.cs`.
+
+Không dùng EPPlus (đổi sang license thương mại từ bản 5+).
 
 ## VI. Chạy test
 
@@ -206,7 +289,7 @@ Lỗi trả về dạng `application/problem+json` (RFC 7807). Swagger UI (chỉ
 dotnet test
 ```
 
-**34 test** (xUnit + FluentAssertions + EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn):
+**51 test** (xUnit + FluentAssertions + EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn):
 
 | File | Nội dung |
 |---|---|
@@ -214,6 +297,7 @@ dotnet test
 | `AuthServiceTests` | Đăng nhập đúng/sai, khoá tài khoản, refresh token rotation, replay bị từ chối, logout |
 | `CreateCustomerRequestValidatorTests` | Email, SĐT, ngày sinh |
 | `AuditLogInterceptorTests` | Ghi Added / Modified (chỉ field thay đổi) / Deleted, thứ tự mới nhất trước |
+| `CustomerImportServiceTests` | Import xlsx/csv hợp lệ (kể cả delimiter `;` + BOM), sinh mã KH tuần tự + audit log qua `AddRange`, file rỗng/sai extension/hỏng/thiếu cột, email sai định dạng, trùng trong file, trùng DB (và không trùng nếu bản ghi gốc đã xoá mềm), vượt `MaxRows`/`MaxFileSizeBytes`, session không tồn tại, rollback all-or-nothing khi dữ liệu đổi giữa preview/confirm, date-serial Excel, template tự parse lại được, import 200 dòng |
 
 ## VII. Các quyết định kỹ thuật đáng chú ý (giải thích chi tiết bằng comment trong code)
 
@@ -244,6 +328,7 @@ dotnet test
 - CI (GitHub Actions) chạy `dotnet build` + `dotnet test` cho mỗi PR.
 - API xoá hàng loạt phía backend (UI hiện gọi lần lượt từng `DELETE`).
 - Export Excel/CSV, Full-Text Search khi dữ liệu lớn, Microsoft Entra ID.
+- Import: `IMemoryCache` cho phiên preview chỉ phù hợp 1 instance API — nếu scale-out nhiều instance sau này cần đổi sang Redis (`IDistributedCache`, cùng hướng với Output Cache đã hỗ trợ Redis optional). File hiện đọc trọn vào bộ nhớ (bounded bởi `MaxFileSizeBytes`) thay vì streaming — đủ dùng ở quy mô "mini" nhưng không phù hợp nếu nâng giới hạn lên hàng trăm MB. Import chạy đồng bộ trong request; nếu cần hỗ trợ file rất lớn/chạy nền, cân nhắc hàng đợi (background job) thay vì API đồng bộ.
 
 ### Đánh đổi bảo mật có chủ đích
 

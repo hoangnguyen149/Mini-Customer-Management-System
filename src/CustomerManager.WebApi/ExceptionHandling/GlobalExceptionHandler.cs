@@ -29,6 +29,8 @@ public class GlobalExceptionHandler : IExceptionHandler
             ValidationException => (StatusCodes.Status400BadRequest, "Validation failed"),
             NotFoundException => (StatusCodes.Status404NotFound, "Resource not found"),
             ConflictException => (StatusCodes.Status409Conflict, "Conflict"),
+            ImportFileException => (StatusCodes.Status400BadRequest, "Import file invalid"),
+            ImportValidationFailedException => (StatusCodes.Status409Conflict, "Import validation failed"),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred")
         };
 
@@ -63,6 +65,14 @@ public class GlobalExceptionHandler : IExceptionHandler
             problemDetails.Extensions["errors"] = validationException.Errors
                 .GroupBy(e => e.PropertyName)
                 .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
+        }
+
+        if (exception is ImportValidationFailedException importException)
+        {
+            problemDetails.Extensions["totalRows"] = importException.TotalRows;
+            problemDetails.Extensions["validRows"] = importException.ValidRows;
+            problemDetails.Extensions["invalidRows"] = importException.InvalidRows;
+            problemDetails.Extensions["errors"] = importException.Errors;
         }
 
         httpContext.Response.StatusCode = statusCode;

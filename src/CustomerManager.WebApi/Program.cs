@@ -5,6 +5,7 @@ using CustomerManager.Application;
 using CustomerManager.Infrastructure;
 using CustomerManager.WebApi.ExceptionHandling;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -153,6 +154,19 @@ builder.Services.AddHsts(options =>
 {
     options.MaxAge = TimeSpan.FromDays(180);
     options.IncludeSubDomains = true;
+});
+
+// ---------------------------------------------------------------------------
+// Customer import (Excel/CSV) upload size — enforced at the multipart-parsing
+// level (before CustomerImportController/CustomerImportService ever see the
+// request), in addition to the same limit re-checked in
+// CustomerImportService.PreviewAsync from the same config key. Read here, not
+// hard-coded, per Import:MaxFileSizeBytes in appsettings.json.
+// ---------------------------------------------------------------------------
+var maxImportFileSizeBytes = builder.Configuration.GetValue<long?>("Import:MaxFileSizeBytes") ?? 5 * 1024 * 1024;
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxImportFileSizeBytes;
 });
 
 var app = builder.Build();

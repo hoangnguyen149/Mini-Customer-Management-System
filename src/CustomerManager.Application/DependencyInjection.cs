@@ -12,6 +12,7 @@ public static class DependencyInjection
     {
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<ICustomerImportService, CustomerImportService>();
 
         services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
 

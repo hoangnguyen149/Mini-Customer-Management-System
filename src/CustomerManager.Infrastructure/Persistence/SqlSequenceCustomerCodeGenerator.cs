@@ -22,10 +22,18 @@ public class SqlSequenceCustomerCodeGenerator : ICustomerCodeGenerator
 
     public async Task<string> NextAsync(CancellationToken ct)
     {
-        var nextValue = await _context.Database
+        // SingleAsync()/FirstAsync() on a SqlQueryRaw result make EF Core wrap
+        // the raw SQL in a derived-table subquery (to apply its own TOP(n)
+        // cardinality check) — and SQL Server explicitly rejects "NEXT VALUE
+        // FOR" inside a subquery/derived table ("not allowed in ... derived
+        // tables"), so this only ever worked against unit tests (which fake
+        // this generator entirely) and silently 500'd against a real SQL
+        // Server. ToListAsync() executes the raw SQL as-is with no wrapper;
+        // the single row is then read in-memory.
+        var values = await _context.Database
             .SqlQueryRaw<int>("SELECT NEXT VALUE FOR dbo.CustomerCodeSequence AS Value")
-            .SingleAsync(ct);
+            .ToListAsync(ct);
 
-        return $"{Prefix}{nextValue:D4}";
+        return $"{Prefix}{values.Single():D4}";
     }
 }
