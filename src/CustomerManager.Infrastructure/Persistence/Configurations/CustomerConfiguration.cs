@@ -1,3 +1,4 @@
+using CustomerManager.Application.Common;
 using CustomerManager.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -29,7 +30,11 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         // which go through the Global Query Filter and therefore already ignore
         // deleted rows — before this filter, that mismatch let a deleted row's
         // email silently block every future create/update on that email (Issue H2).
-        builder.HasIndex(x => x.Email).IsUnique().HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0")
+            // Pinned: CustomerService maps a violation of exactly this index to 409.
+            .HasDatabaseName(DatabaseConstraintNames.CustomerEmailUnique);
         builder.Property(x => x.Email).HasMaxLength(150).IsRequired();
 
         // Not unique: PhoneNumber is indexed for search performance only (see
@@ -48,12 +53,17 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(x => x.IsActive).IsRequired().ValueGeneratedNever();
 
         builder.Property(x => x.IsDeleted).HasDefaultValue(false);
-        // Filtered index: most queries go through the Global Query Filter
-        // (IsDeleted = 0), so this keeps that lookup cheap without indexing rows
-        // that are never queried in the common case.
-        builder.HasIndex(x => x.IsDeleted).HasFilter("[IsDeleted] = 0");
 
         builder.Property(x => x.CreatedAt).IsRequired();
+
+        // Serves the default list query exactly: Global Query Filter
+        // (IsDeleted = 0) + ORDER BY CreatedAt DESC + OFFSET/FETCH, without a
+        // full scan and sort. Replaces the old filtered index keyed on IsDeleted
+        // itself, which (a single constant value) the optimizer never used.
+        builder.HasIndex(x => x.CreatedAt)
+            .IsDescending()
+            .HasFilter("[IsDeleted] = 0")
+            .HasDatabaseName("IX_Customers_CreatedAt_Active");
         builder.Property(x => x.CreatedBy).HasMaxLength(50).IsRequired();
         builder.Property(x => x.UpdatedBy).HasMaxLength(50);
 

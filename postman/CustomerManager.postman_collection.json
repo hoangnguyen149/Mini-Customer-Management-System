@@ -97,7 +97,7 @@
                 "login"
               ]
             },
-            "description": "Đăng nhập bằng tài khoản admin đã seed (AdminSeed trong User Secrets). Trả về access token JWT (hết hạn sau 15 phút) và refresh token (7 ngày).\n\n- 401: sai username HOẶC sai password — API cố tình không phân biệt 2 trường hợp để chống dò tài khoản.\n- 423: tài khoản tạm khoá sau 5 lần sai liên tiếp (15 phút, cấu hình qua Security:MaxFailedLoginAttempts / Security:LockoutDurationMinutes).\n- 429: vượt rate limit Token Bucket 5 request/phút/IP."
+            "description": "Đăng nhập bằng tài khoản admin đã seed (AdminSeed trong User Secrets). Trả về access token JWT (hết hạn sau 15 phút) và refresh token (7 ngày).\n\n- 401: sai username HOẶC sai password — API cố tình không phân biệt 2 trường hợp để chống dò tài khoản.\n- 423: cặp (username, IP) này tạm khoá sau 5 lần sai liên tiếp — IP khác vẫn đăng nhập được (15 phút, cấu hình qua Security:MaxFailedLoginAttempts / Security:LockoutDurationMinutes).\n- 429: vượt rate limit Token Bucket 5 request/phút/IP."
           },
           "response": [
             {
@@ -135,7 +135,7 @@
               "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc7231#section-6.5.1\",\n  \"title\": \"Invalid credentials\",\n  \"status\": 401,\n  \"detail\": \"Tên đăng nhập hoặc mật khẩu không đúng.\",\n  \"traceId\": \"00-...\"\n}"
             },
             {
-              "name": "423 Locked — tài khoản tạm khoá do sai nhiều lần",
+              "name": "423 Locked — IP này tạm khoá do sai nhiều lần",
               "originalRequest": {
                 "method": "POST",
                 "url": "{{baseUrl}}/api/auth/login"
@@ -149,7 +149,7 @@
                   "value": "application/problem+json"
                 }
               ],
-              "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc4918#section-11.3\",\n  \"title\": \"Account locked\",\n  \"status\": 423,\n  \"detail\": \"Tài khoản tạm khoá do đăng nhập sai nhiều lần. Vui lòng thử lại sau 15 phút.\",\n  \"traceId\": \"00-...\"\n}"
+              "body": "{\n  \"type\": \"https://tools.ietf.org/html/rfc4918#section-11.3\",\n  \"title\": \"Account locked\",\n  \"status\": 423,\n  \"detail\": \"Đăng nhập tạm khoá do nhập sai nhiều lần từ thiết bị này. Vui lòng thử lại sau 15 phút.\",\n  \"traceId\": \"00-...\"\n}"
             },
             {
               "name": "429 Too Many Requests — vượt rate limit",

@@ -126,6 +126,11 @@ namespace CustomerManager.Infrastructure.Persistence.Migrations
 
                     SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"), false);
 
+                    b.HasIndex("CreatedAt")
+                        .IsDescending()
+                        .HasDatabaseName("IX_Customers_CreatedAt_Active")
+                        .HasFilter("[IsDeleted] = 0");
+
                     b.HasIndex("CustomerCode")
                         .IsUnique();
 
@@ -133,9 +138,7 @@ namespace CustomerManager.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Email")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0");
-
-                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_Customers_Email")
                         .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("PhoneNumber");
@@ -181,14 +184,6 @@ namespace CustomerManager.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("FailedLoginAttempts")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime?>("LockedOutUntil")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("PasswordHash")

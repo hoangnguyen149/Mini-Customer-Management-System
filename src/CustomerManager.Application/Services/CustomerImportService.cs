@@ -1,5 +1,7 @@
 using System.Globalization;
+using CustomerManager.Application.Common;
 using CustomerManager.Application.Common.Exceptions;
+using CustomerManager.Application.Common.Options;
 using CustomerManager.Application.Imports;
 using CustomerManager.Application.Interfaces;
 using CustomerManager.Contracts.Customers;
@@ -8,7 +10,7 @@ using CustomerManager.Domain.Entities;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace CustomerManager.Application.Services;
 
@@ -28,10 +30,6 @@ namespace CustomerManager.Application.Services;
 /// </summary>
 public class CustomerImportService : ICustomerImportService
 {
-    private const long DefaultMaxFileSizeBytes = 5 * 1024 * 1024;
-    private const int DefaultMaxRows = 10_000;
-    private const int DefaultSessionExpiryMinutes = 15;
-
     private static readonly string[] SupportedExtensions = { ".xlsx", ".csv" };
     private static readonly string[] DateFormats = { "dd/MM/yyyy", "yyyy-MM-dd", "d/M/yyyy" };
 
@@ -41,7 +39,8 @@ public class CustomerImportService : ICustomerImportService
     private readonly ICustomerImportWorkbookWriter _workbookWriter;
     private readonly IValidator<CreateCustomerRequest> _validator;
     private readonly IMemoryCache _cache;
-    private readonly IConfiguration _configuration;
+    private readonly ImportOptions _options;
+    private readonly TimeProvider _timeProvider;
 
     public CustomerImportService(
         IApplicationDbContext context,
@@ -50,7 +49,8 @@ public class CustomerImportService : ICustomerImportService
         ICustomerImportWorkbookWriter workbookWriter,
         IValidator<CreateCustomerRequest> validator,
         IMemoryCache cache,
-        IConfiguration configuration)
+        IOptions<ImportOptions> options,
+        TimeProvider timeProvider)
     {
         _context = context;
         _customerCodeGenerator = customerCodeGenerator;
@@ -58,7 +58,8 @@ public class CustomerImportService : ICustomerImportService
         _workbookWriter = workbookWriter;
         _validator = validator;
         _cache = cache;
-        _configuration = configuration;
+        _options = options.Value;
+        _timeProvider = timeProvider;
     }
 
     public byte[] BuildTemplate() => _workbookWriter.BuildTemplate();
@@ -70,10 +71,9 @@ public class CustomerImportService : ICustomerImportService
             throw new ImportFileException("File rỗng, vui lòng chọn file khác.");
         }
 
-        var maxFileSizeBytes = _configuration.GetValue<long?>("Import:MaxFileSizeBytes") ?? DefaultMaxFileSizeBytes;
-        if (fileSizeBytes > maxFileSizeBytes)
+        if (fileSizeBytes > _options.MaxFileSizeBytes)
         {
-            throw new ImportFileException($"File vượt quá kích thước tối đa {maxFileSizeBytes / 1024 / 1024} MB.");
+            throw new ImportFileException($"File vượt quá kích thước tối đa {_options.MaxFileSizeBytes / 1024 / 1024} MB.");
         }
 
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
@@ -82,8 +82,7 @@ public class CustomerImportService : ICustomerImportService
             throw new ImportFileException($"Định dạng file '{extension}' không được hỗ trợ. Chỉ chấp nhận .xlsx hoặc .csv.");
         }
 
-        var maxRows = _configuration.GetValue<int?>("Import:MaxRows") ?? DefaultMaxRows;
-        var rawRows = await _parser.ParseAsync(fileContent, fileName, maxRows, ct);
+        var rawRows = await _parser.ParseAsync(fileContent, fileName, _options.MaxRows, ct);
 
         if (rawRows.Count == 0)
         {
@@ -93,16 +92,22 @@ public class CustomerImportService : ICustomerImportService
         var (rowResults, candidates) = await ValidateRowsAsync(rawRows, ct);
         await MarkDatabaseDuplicatesAsync(rowResults, candidates, ct);
 
+        // O(n): the old per-candidate First() lookup was O(n²) — ~50M
+        // comparisons for a 10,000-row file.
+        var validRowNumbers = rowResults
+            .Where(r => r.Status == ImportRowStatus.Valid)
+            .Select(r => r.RowNumber)
+            .ToHashSet();
+
         var session = new ImportSession
         {
             AllRows = rowResults,
-            ValidCandidates = candidates.Where(c => IsStillValid(rowResults, c.RowNumber)).ToList()
+            ValidCandidates = candidates.Where(c => validRowNumbers.Contains(c.RowNumber)).ToList()
         };
 
         var sessionId = Guid.NewGuid();
-        var expiryMinutes = _configuration.GetValue<int?>("Import:SessionExpiryMinutes") ?? DefaultSessionExpiryMinutes;
-        var expiresAtUtc = DateTime.UtcNow.AddMinutes(expiryMinutes);
-        _cache.Set(CacheKey(sessionId), session, expiresAtUtc);
+        var expiresAtUtc = _timeProvider.GetUtcNow().UtcDateTime.AddMinutes(_options.SessionExpiryMinutes);
+        _cache.Set(CacheKey(sessionId), session, new DateTimeOffset(expiresAtUtc, TimeSpan.Zero));
 
         return new ImportPreviewResponse
         {
@@ -120,60 +125,125 @@ public class CustomerImportService : ICustomerImportService
     {
         var session = GetSessionOrThrow(importSessionId);
 
-        // State may have changed since Preview (another request took one of
-        // these emails) — re-check before writing anything. All-or-nothing:
-        // any new conflict aborts the whole import.
-        var candidateEmails = session.ValidCandidates.Select(c => c.Email).ToList();
-        var existingEmails = candidateEmails.Count == 0
-            ? new List<string>()
-            : await _context.Customers
-                .Where(c => candidateEmails.Contains(c.Email))
-                .Select(c => c.Email)
-                .ToListAsync(ct);
-
-        if (existingEmails.Count > 0)
+        // Double click / client retry: a second concurrent Confirm of the same
+        // session would otherwise pass the re-check below too and collide on
+        // the Email unique index (a raw 500).
+        if (!session.TryBeginConfirm())
         {
-            var existingSet = new HashSet<string>(existingEmails);
-            var conflictedRowNumbers = session.ValidCandidates
-                .Where(c => existingSet.Contains(c.Email))
-                .Select(c => c.RowNumber)
-                .ToHashSet();
+            throw new ConflictException("Phiên import này đang được xác nhận, vui lòng đợi.");
+        }
 
-            foreach (var row in session.AllRows.Where(r => conflictedRowNumbers.Contains(r.RowNumber)))
+        try
+        {
+            // State may have changed since Preview (another request took one of
+            // these emails) — re-check before writing anything. All-or-nothing.
+            var conflictedEmails = await FindExistingEmailsAsync(session.ValidCandidates.Select(c => c.Email).ToList(), ct);
+            if (conflictedEmails.Count > 0)
             {
-                row.Status = ImportRowStatus.DuplicateInDatabase;
-                row.Errors.Add("Email đã được sử dụng bởi một khách hàng khác kể từ lúc xem trước (preview).");
+                throw RejectWithConflicts(importSessionId, session, conflictedEmails);
             }
 
-            throw new ImportValidationFailedException(
-                "Dữ liệu đã thay đổi kể từ lúc xem trước, import bị huỷ — chưa có khách hàng nào được ghi. Vui lòng tải lại file và thử lại.",
-                totalRows: session.AllRows.Count,
-                validRows: session.AllRows.Count(r => r.Status == ImportRowStatus.Valid),
-                invalidRows: session.AllRows.Count(r => r.Status != ImportRowStatus.Valid),
-                errors: session.AllRows.Where(r => r.Status != ImportRowStatus.Valid).ToList());
+            // One round trip for all codes instead of one per row.
+            var codes = await _customerCodeGenerator.NextRangeAsync(session.ValidCandidates.Count, ct);
+            var entities = session.ValidCandidates
+                .Select((candidate, i) => Customer.Create(codes[i], candidate.FullName, candidate.Email, candidate.PhoneNumber, candidate.DateOfBirth, isActive: true))
+                .ToList();
+
+            _context.Customers.AddRange(entities);
+
+            try
+            {
+                await _context.SaveChangesAsync(ct);
+            }
+            catch (UniqueConstraintViolationException ex) when (ex.ConstraintName == DatabaseConstraintNames.CustomerEmailUnique)
+            {
+                // Lost the race after the re-check above: another request
+                // inserted one of these emails in between. Nothing was written
+                // (single SaveChanges = single transaction).
+                foreach (var entity in entities)
+                {
+                    _context.Customers.Entry(entity).State = EntityState.Detached;
+                }
+
+                var nowTaken = await FindExistingEmailsAsync(session.ValidCandidates.Select(c => c.Email).ToList(), ct);
+                throw RejectWithConflicts(importSessionId, session, nowTaken);
+            }
+
+            // Consumed: a later Confirm of the same id is a 404, not a re-import.
+            _cache.Remove(CacheKey(importSessionId));
+
+            return new ImportConfirmResponse
+            {
+                Success = true,
+                Message = $"Đã import thành công {entities.Count} khách hàng.",
+                TotalRows = session.AllRows.Count,
+                ImportedRows = entities.Count,
+                FailedRows = 0
+            };
         }
-
-        var entities = new List<Customer>(session.ValidCandidates.Count);
-        foreach (var candidate in session.ValidCandidates)
+        finally
         {
-            var code = await _customerCodeGenerator.NextAsync(ct);
-            entities.Add(Customer.Create(code, candidate.FullName, candidate.Email, candidate.PhoneNumber, candidate.DateOfBirth, isActive: true));
+            session.EndConfirm();
         }
-
-        _context.Customers.AddRange(entities);
-        await _context.SaveChangesAsync(ct);
-
-        _cache.Remove(CacheKey(importSessionId));
-
-        return new ImportConfirmResponse
-        {
-            Success = true,
-            Message = $"Đã import thành công {entities.Count} khách hàng.",
-            TotalRows = session.AllRows.Count,
-            ImportedRows = entities.Count,
-            FailedRows = 0
-        };
     }
+
+    private async Task<HashSet<string>> FindExistingEmailsAsync(List<string> emails, CancellationToken ct)
+    {
+        if (emails.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        var existing = await _context.Customers
+            .Where(c => emails.Contains(c.Email))
+            .Select(c => c.Email)
+            .ToListAsync(ct);
+
+        return existing.ToHashSet();
+    }
+
+    /// <summary>Builds new row objects (never mutates the cached ones), caches
+    /// the updated session so the error report reflects the new conflicts, and
+    /// returns the exception to throw.</summary>
+    private ImportValidationFailedException RejectWithConflicts(Guid sessionId, ImportSession session, HashSet<string> conflictedEmails)
+    {
+        var conflictedRowNumbers = session.ValidCandidates
+            .Where(c => conflictedEmails.Contains(c.Email))
+            .Select(c => c.RowNumber)
+            .ToHashSet();
+
+        var updatedRows = session.AllRows
+            .Select(r => conflictedRowNumbers.Contains(r.RowNumber)
+                ? CopyWithStatus(r, ImportRowStatus.DuplicateInDatabase, "Email đã được sử dụng bởi một khách hàng khác kể từ lúc xem trước (preview).")
+                : r)
+            .ToList();
+
+        var updatedSession = new ImportSession
+        {
+            AllRows = updatedRows,
+            ValidCandidates = session.ValidCandidates.Where(c => !conflictedRowNumbers.Contains(c.RowNumber)).ToList()
+        };
+        _cache.Set(CacheKey(sessionId), updatedSession, TimeSpan.FromMinutes(_options.SessionExpiryMinutes));
+
+        var errorRows = updatedRows.Where(r => r.Status != ImportRowStatus.Valid).ToList();
+        return new ImportValidationFailedException(
+            "Dữ liệu đã thay đổi kể từ lúc xem trước, import bị huỷ — chưa có khách hàng nào được ghi. Vui lòng tải lại file và thử lại.",
+            totalRows: updatedRows.Count,
+            validRows: updatedRows.Count - errorRows.Count,
+            invalidRows: errorRows.Count,
+            errors: errorRows);
+    }
+
+    private static ImportRowResult CopyWithStatus(ImportRowResult row, ImportRowStatus status, string extraError) => new()
+    {
+        RowNumber = row.RowNumber,
+        FullName = row.FullName,
+        Email = row.Email,
+        PhoneNumber = row.PhoneNumber,
+        DateOfBirthRaw = row.DateOfBirthRaw,
+        Status = status,
+        Errors = row.Errors.Append(extraError).ToList()
+    };
 
     public Task<byte[]> BuildErrorReportAsync(Guid importSessionId, CancellationToken ct)
     {
@@ -216,7 +286,7 @@ public class CustomerImportService : ICustomerImportService
                 // DateOfBirth-specific error above is what actually reports
                 // the problem, so FluentValidation's own DateOfBirth errors
                 // for this placeholder are filtered out below.
-                DateOfBirth = dateParsed ? dateOfBirth : DateOnly.FromDateTime(DateTime.UtcNow),
+                DateOfBirth = dateParsed ? dateOfBirth : DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime),
                 IsActive = true
             };
 
@@ -301,9 +371,6 @@ public class CustomerImportService : ICustomerImportService
             }
         }
     }
-
-    private static bool IsStillValid(List<ImportRowResult> rowResults, int rowNumber) =>
-        rowResults.First(r => r.RowNumber == rowNumber).Status == ImportRowStatus.Valid;
 
     private ImportSession GetSessionOrThrow(Guid importSessionId)
     {

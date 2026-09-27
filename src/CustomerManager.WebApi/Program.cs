@@ -2,8 +2,10 @@ using System.Net;
 using System.Text;
 using System.Threading.RateLimiting;
 using CustomerManager.Application;
+using CustomerManager.Application.Common.Options;
 using CustomerManager.Infrastructure;
 using CustomerManager.WebApi.ExceptionHandling;
+using CustomerManager.WebApi.Filters;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -48,10 +50,38 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 // ---------------------------------------------------------------------------
+// Strongly-typed options, validated once at startup: a missing/short JWT secret
+// or a zero lockout threshold stops the app immediately instead of failing
+// (or silently weakening security) on the first request that needs it.
+// ---------------------------------------------------------------------------
+builder.Services.AddOptions<JwtOptions>()
+    .BindConfiguration(JwtOptions.SectionName)
+    .Validate(o => !string.IsNullOrWhiteSpace(o.Secret) && o.Secret.Length >= JwtOptions.MinSecretLength,
+        $"Jwt:Secret is missing or shorter than {JwtOptions.MinSecretLength} characters. Configure it with " +
+        "'dotnet user-secrets set \"Jwt:Secret\" \"<a long random string>\"' (dev) or an environment variable (prod) — see README.md.")
+    .Validate(o => o.ExpiryMinutes is > 0 and <= 60, "Jwt:ExpiryMinutes must be between 1 and 60.")
+    .Validate(o => o.RefreshTokenExpiryDays is > 0 and <= 30, "Jwt:RefreshTokenExpiryDays must be between 1 and 30.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<SecurityOptions>()
+    .BindConfiguration(SecurityOptions.SectionName)
+    .Validate(o => o.MaxFailedLoginAttempts > 0 && o.LockoutDurationMinutes > 0,
+        "Security:MaxFailedLoginAttempts and Security:LockoutDurationMinutes must be positive.")
+    .ValidateOnStart();
+
+builder.Services.AddOptions<ImportOptions>()
+    .BindConfiguration(ImportOptions.SectionName)
+    .Validate(o => o.MaxFileSizeBytes > 0 && o.MaxRows > 0 && o.SessionExpiryMinutes > 0,
+        "Import:* settings must be positive.")
+    .ValidateOnStart();
+
+// ---------------------------------------------------------------------------
 // Controllers + ProblemDetails (RFC 7807) — see GlobalExceptionHandler for the
 // single place every exception is turned into a problem+json response.
 // ---------------------------------------------------------------------------
-builder.Services.AddControllers();
+// FluentValidationFilter validates every action argument that has a
+// registered validator, so controllers never call validators by hand.
+builder.Services.AddControllers(options => options.Filters.Add<FluentValidationFilter>());
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
@@ -60,17 +90,18 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 // read from appsettings.json — see README.md "Setup" for User Secrets /
 // environment variable configuration.
 // ---------------------------------------------------------------------------
-var jwtSecret = builder.Configuration["Jwt:Secret"];
-if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+// Read the same section the options above bind, for TokenValidationParameters
+// (needed before the container is built). Validation of these values lives in
+// the AddOptions<JwtOptions>() block above; this check only makes the failure
+// happen here, before Build(), with the same message.
+var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+if (string.IsNullOrWhiteSpace(jwtOptions.Secret) || jwtOptions.Secret.Length < JwtOptions.MinSecretLength)
 {
     throw new InvalidOperationException(
-        "Jwt:Secret is missing or shorter than 32 characters. Configure it with " +
+        $"Jwt:Secret is missing or shorter than {JwtOptions.MinSecretLength} characters. Configure it with " +
         "'dotnet user-secrets set \"Jwt:Secret\" \"<a long random string>\"' (dev) " +
         "or an environment variable (prod) before starting the API — see README.md.");
 }
-
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "CustomerManager";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "CustomerManager.Client";
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -79,11 +110,13 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = jwtIssuer,
+            ValidIssuer = jwtOptions.Issuer,
             ValidateAudience = true,
-            ValidAudience = jwtAudience,
+            ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret)),
+            // Only the algorithm we actually sign with.
+            ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 },
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(30)
         };
@@ -121,7 +154,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("BlazorClient", policy => policy
         .WithOrigins(allowedOrigins)
         .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-        .WithHeaders("Content-Type", "Authorization"));
+        .WithHeaders("Content-Type", "Authorization", "If-Match"));
 });
 
 // ---------------------------------------------------------------------------
@@ -163,7 +196,8 @@ builder.Services.AddHsts(options =>
 // CustomerImportService.PreviewAsync from the same config key. Read here, not
 // hard-coded, per Import:MaxFileSizeBytes in appsettings.json.
 // ---------------------------------------------------------------------------
-var maxImportFileSizeBytes = builder.Configuration.GetValue<long?>("Import:MaxFileSizeBytes") ?? 5 * 1024 * 1024;
+var maxImportFileSizeBytes = builder.Configuration.GetSection(ImportOptions.SectionName).Get<ImportOptions>()?.MaxFileSizeBytes
+    ?? new ImportOptions().MaxFileSizeBytes;
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = maxImportFileSizeBytes;

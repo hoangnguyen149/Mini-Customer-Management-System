@@ -9,21 +9,21 @@ namespace CustomerManager.Infrastructure.Persistence.Interceptors;
 /// <summary>
 /// Centralizes two cross-cutting rules so individual services never have to
 /// remember them:
-///   1. Soft delete — a Deleted entity is rewritten to Modified + IsDeleted=true,
-///      so DbSet.Remove(...) never issues a physical DELETE for ISoftDeletable
-///      entities. This is intentionally done here (not a DB Trigger) so the logic
-///      stays in source control, is unit-testable, and is visible in one place.
+///   1. Soft delete — a Deleted entity is rewritten into an update of the
+///      IsDeleted column only, so DbSet.Remove(...) never issues a physical
+///      DELETE for ISoftDeletable entities.
 ///   2. Audit stamping — CreatedAt/CreatedBy on insert, UpdatedAt/UpdatedBy on
-///      update, both taken from ICurrentUserService, so IAuditable entities never
-///      need this set manually from Application code (and can't forget to).
+///      update, from ICurrentUserService and TimeProvider.
 /// </summary>
 public class SoftDeleteAndAuditInterceptor : SaveChangesInterceptor
 {
     private readonly ICurrentUserService _currentUserService;
+    private readonly TimeProvider _timeProvider;
 
-    public SoftDeleteAndAuditInterceptor(ICurrentUserService currentUserService)
+    public SoftDeleteAndAuditInterceptor(ICurrentUserService currentUserService, TimeProvider timeProvider)
     {
         _currentUserService = currentUserService;
+        _timeProvider = timeProvider;
     }
 
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
@@ -49,9 +49,10 @@ public class SoftDeleteAndAuditInterceptor : SaveChangesInterceptor
         }
 
         var username = _currentUserService.Username ?? "system";
-        var now = DateTime.UtcNow;
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
 
-        foreach (var entry in context.ChangeTracker.Entries())
+        // Materialized: entry states are changed inside the loop.
+        foreach (var entry in context.ChangeTracker.Entries().ToList())
         {
             ApplySoftDelete(entry);
             ApplyAudit(entry, username, now);
@@ -65,8 +66,13 @@ public class SoftDeleteAndAuditInterceptor : SaveChangesInterceptor
             return;
         }
 
-        entry.State = EntityState.Modified;
-        entry.CurrentValues[nameof(ISoftDeletable.IsDeleted)] = true;
+        // Unchanged first, then set the one property: only IsDeleted ends up
+        // IsModified. Setting State = Modified directly would mark *every*
+        // column modified — the UPDATE would rewrite all columns (including the
+        // clustered key CustomerCode) and AuditLogInterceptor would record every
+        // field as "changed" in the Deleted audit entry.
+        entry.State = EntityState.Unchanged;
+        entry.Property(nameof(ISoftDeletable.IsDeleted)).CurrentValue = true;
     }
 
     private static void ApplyAudit(EntityEntry entry, string username, DateTime now)

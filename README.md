@@ -16,7 +16,7 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 
 **Bắt buộc**
 
-- CRUD khách hàng: danh sách, thêm mới (Mã KH tự sinh `KH-0001`), cập nhật, xoá (soft delete).
+- CRUD khách hàng: danh sách, thêm mới (Mã KH tự sinh `KH-000001` từ SQL sequence), cập nhật, xoá (soft delete).
 - Tìm kiếm theo Họ và tên / Số điện thoại, lọc theo trạng thái hoạt động, phân trang + sắp xếp server-side.
 - Validation (FluentValidation phía server + validate trên form): Email đúng định dạng và không trùng, SĐT bắt buộc và gồm 10 số bắt đầu bằng 0, ngày sinh hợp lệ.
 
@@ -24,9 +24,9 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 
 - **MudBlazor:** `MudDataGrid` server-side, dialog Thêm/Sửa/Xoá, Dashboard KPI, trang chi tiết khách hàng, Filter Drawer, xoá hàng loạt, card view trên mobile, dark mode, Command Palette (`Ctrl+K`).
 - **Import khách hàng từ Excel/CSV:** chọn file → xem trước (preview, chưa ghi DB) → validate + phát hiện trùng (trong file lẫn với DB) → xác nhận → ghi hàng loạt an toàn (all-or-nothing). Xem chi tiết ở mục V.
-- **Xác thực JWT:** 1 tài khoản admin seed từ User Secrets; access token 15 phút + refresh token 7 ngày (xoay vòng, DB chỉ lưu SHA-256 hash), tự làm mới phiên ở Blazor; khoá tài khoản 15 phút sau 5 lần đăng nhập sai; rate limit 5 request/phút/IP cho login/refresh.
+- **Xác thực JWT:** 1 tài khoản admin seed từ User Secrets; access token 15 phút + refresh token 7 ngày (xoay vòng, DB chỉ lưu SHA-256 hash), tự làm mới phiên ở Blazor; khoá đăng nhập 15 phút sau 5 lần sai **theo cặp (username, IP)** — kẻ tấn công chỉ khoá được IP của chính họ, không khoá được admin duy nhất; phát hiện refresh token bị dùng lại (thu hồi toàn bộ phiên); rate limit 5 request/phút/IP cho login/refresh.
 - **Truy vết:** `CreatedBy/UpdatedBy` trên khách hàng + bảng `AuditLogs` lưu toàn bộ lịch sử thay đổi (giá trị cũ/mới dạng JSON), xem được trên UI.
-- **An toàn dữ liệu:** optimistic concurrency bằng `ROWVERSION` (409 khi 2 người cùng sửa), ProblemDetails (RFC 7807), security headers, HSTS, CORS whitelist, Output Cache có invalidate theo tag.
+- **An toàn dữ liệu:** optimistic concurrency bằng `ROWVERSION` (409 khi 2 người cùng sửa), ProblemDetails (RFC 7807), security headers, HSTS, CORS whitelist.
 - **Git:** GitFlow (`main` / `develop` / `feature/*` / `test/*`) + Conventional Commits.
 
 ## I. Yêu cầu môi trường
@@ -34,7 +34,7 @@ Hệ thống quản lý khách hàng cơ bản cho môi trường tài chính/ng
 - .NET 8 SDK
 - SQL Server (LocalDB, Developer Edition, hoặc Docker `mcr.microsoft.com/mssql/server`)
 - Công cụ `dotnet-ef`: `dotnet tool install --global dotnet-ef`
-- (Tuỳ chọn) Redis — chỉ cần nếu muốn Output Cache dùng Redis thay vì in-memory mặc định
+- Docker — chỉ cần để chạy integration test (Testcontainers)
 - (Tuỳ chọn) [Postman](https://www.postman.com/) — import `postman/CustomerManager.postman_collection.json` để gọi thử API
 
 ### Không có SQL Server cài sẵn? Chạy bằng Docker
@@ -109,13 +109,17 @@ dotnet user-secrets set "AdminSeed:Password" "<mật khẩu đủ mạnh>"
 
 ### 4. Tạo database từ migration có sẵn
 
-Repo đã có sẵn 3 migration trong `src/CustomerManager.Infrastructure/Persistence/Migrations`:
+Repo đã có sẵn 5 migration trong `src/CustomerManager.Infrastructure/Persistence/Migrations`:
 
 | Migration | Nội dung |
 |---|---|
 | `InitialCreate` | Bảng `Users`, `Customers` (index, RowVersion, soft delete, CreatedBy/UpdatedBy) |
 | `AddAuditLogs` | Bảng `AuditLogs` |
-| `AddRefreshTokenAndLockout` | Bảng `RefreshTokens`, cột `Users.FailedLoginAttempts` / `LockedOutUntil` |
+| `AddRefreshTokenAndLockout` | Bảng `RefreshTokens`, cột lockout trên `Users` (đã bỏ ở `ReviewFixes`) |
+| `AddCustomerCodeSequenceAndFilteredEmailIndex` | Sequence `dbo.CustomerCodeSequence`, unique index Email chỉ áp dụng cho bản ghi chưa xoá |
+| `ReviewFixes` | Mã KH đổi sang 6 chữ số (`KH-000001`, cập nhật cả dữ liệu cũ); **đưa sequence vượt qua mã lớn nhất đang có** (DB có dữ liệu từ trước sequence bị lỗi trùng mã); index `IX_Customers_CreatedAt_Active` cho truy vấn danh sách mặc định; bỏ cột lockout khỏi `Users` |
+
+> Nếu database đã có dữ liệu, migration `ReviewFixes` sẽ đổi toàn bộ Mã KH sang 6 chữ số — mọi form sửa đang mở sẽ nhận 409 (RowVersion đổi) và cần tải lại.
 
 Chỉ cần áp dụng vào database (chạy từ thư mục gốc solution):
 
@@ -133,9 +137,8 @@ dotnet ef database update \
 |---|---|---|
 | `Jwt:ExpiryMinutes` | 15 | Thời hạn access token |
 | `Jwt:RefreshTokenExpiryDays` | 7 | Thời hạn refresh token |
-| `Security:MaxFailedLoginAttempts` | 5 | Số lần sai trước khi khoá tài khoản |
+| `Security:MaxFailedLoginAttempts` | 5 | Số lần sai (theo cặp username + IP) trước khi khoá |
 | `Security:LockoutDurationMinutes` | 15 | Thời gian khoá |
-| `ConnectionStrings:Redis` | (trống) | Có giá trị thì Output Cache dùng Redis, trống thì dùng in-memory |
 | `Cors:AllowedOrigins` | `http://localhost:5100`, `https://localhost:7100` (Development) | Origin của Blazor được phép gọi API |
 
 ## IV. Chạy ứng dụng
@@ -188,22 +191,24 @@ Mở `http://localhost:5100`, đăng nhập bằng tài khoản ở bước III.
 - **Blazor báo lỗi gọi API / CORS:** kiểm tra API đang chạy đúng địa chỉ trong `ApiBaseUrl`, và origin của Blazor có trong `Cors:AllowedOrigins`.
 - **Lỗi HTTPS certificate:** `dotnet dev-certs https --trust`, rồi khởi động lại API.
 - **Port đã được sử dụng:** đóng tiến trình đang dùng port `5050`/`7050`/`5100`/`7100`, hoặc cập nhật đồng thời `launchSettings.json`, `.vscode/launch.json`, `ApiBaseUrl` và `Cors:AllowedOrigins`.
-- **Nhận 423 khi đăng nhập:** tài khoản đang bị khoá do sai quá 5 lần — đợi hết thời gian khoá (hoặc giảm `Security:LockoutDurationMinutes` khi dev).
+- **Nhận 423 khi đăng nhập:** IP hiện tại đã nhập sai quá 5 lần — đợi hết thời gian khoá, đăng nhập từ máy khác, hoặc restart API khi dev (bộ đếm lưu in-memory).
 - **IntelliSense không nhận project:** mở đúng thư mục chứa `CustomerManager.sln`, chạy `C# Dev Kit: Restart Language Server`.
 
 ## V. API
 
 | Method | Endpoint | Auth | Mô tả |
 |---|---|---|---|
-| POST | `/api/auth/login` | Anonymous | Đăng nhập — 200 / 401 / 423 (bị khoá) / 429 (rate limit) |
-| POST | `/api/auth/refresh` | Anonymous | Đổi refresh token lấy access token mới (token cũ bị thu hồi) |
+| POST | `/api/auth/login` | Anonymous | Đăng nhập — 200 / 400 / 401 / 423 (IP bị khoá) / 429 (rate limit) |
+| POST | `/api/auth/refresh` | Anonymous | Đổi refresh token lấy access token mới (token cũ bị thu hồi; dùng lại token cũ → thu hồi mọi phiên) |
 | POST | `/api/auth/logout` | Anonymous | Thu hồi refresh token phía server — 204 |
 | GET | `/api/customers` | Bearer | Danh sách: `fullName`, `phoneNumber`, `isActive`, `pageNumber`, `pageSize` (≤100), `sortBy` (`fullName`/`customerCode`/`createdAt`), `sortDirection` |
+| GET | `/api/customers/stats` | Bearer | KPI Dashboard: tổng / đang hoạt động / ngừng (1 truy vấn `GROUP BY`) |
 | GET | `/api/customers/{id}` | Bearer | Chi tiết (kèm `rowVersion`) — 200 / 404 |
 | GET | `/api/customers/{id}/audit-logs` | Bearer | Lịch sử thay đổi, mới nhất trước |
 | POST | `/api/customers` | Bearer | Thêm mới — 201 / 400 / 409 (trùng Email) |
-| PUT | `/api/customers/{id}` | Bearer | Cập nhật, gửi kèm `rowVersion` — 200 / 400 / 404 / 409 (xung đột) |
-| DELETE | `/api/customers/{id}` | Bearer | Xoá mềm — 204 / 404 |
+| PUT | `/api/customers/{id}` | Bearer | Cập nhật, gửi kèm `rowVersion` — 200 / 400 (`rowVersion` sai định dạng) / 404 / 409 (xung đột) |
+| DELETE | `/api/customers/{id}` | Bearer | Xoá mềm — 204 / 404; header `If-Match: "<rowVersion>"` (tuỳ chọn) → 409 nếu bản ghi đã bị sửa |
+| POST | `/api/customers/bulk-delete` | Bearer | Body `{ "ids": [...] }` (≤100) — xoá mềm trong 1 transaction, trả về số đã xoá + id không tồn tại |
 | GET | `/api/customers/import/template` | Bearer | Tải file mẫu (.xlsx) để import |
 | POST | `/api/customers/import/preview` | Bearer | `multipart/form-data`, field `file` (.xlsx/.csv) — đọc + validate + phát hiện trùng, **chưa ghi DB**, trả về bản xem trước kèm `importSessionId` |
 | POST | `/api/customers/import/confirm` | Bearer | Body `{ "importSessionId": "..." }` — validate lại lần cuối rồi ghi hàng loạt (all-or-nothing) — 200 / 404 (session hết hạn) / 409 (dữ liệu đổi từ lúc preview) |
@@ -286,18 +291,23 @@ Không dùng EPPlus (đổi sang license thương mại từ bản 5+).
 ## VI. Chạy test
 
 ```bash
-dotnet test
+dotnet test tests/CustomerManager.UnitTests          # nhanh, không cần gì thêm
+dotnet test tests/CustomerManager.IntegrationTests   # cần Docker đang chạy (SQL Server qua Testcontainers)
 ```
 
-**51 test** (xUnit + FluentAssertions + EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn):
+CI (`.github/workflows/ci.yml`) chạy build + cả hai bộ test cho mọi push/PR vào `main`, `develop`, `feature/**`, `fix/**`.
+
+**64 unit test** (xUnit + FluentAssertions + EF Core InMemory, không mock Repository — xem comment trong `TestDoubles.cs` về lý do và giới hạn):
 
 | File | Nội dung |
 |---|---|
-| `CustomerServiceTests` | Tạo + sinh Mã KH tuần tự, trùng Email, lấy theo Id (kể cả đã xoá mềm), xoá bản ghi không tồn tại, cập nhật + xung đột RowVersion, lọc theo Họ tên |
-| `AuthServiceTests` | Đăng nhập đúng/sai, khoá tài khoản, refresh token rotation, replay bị từ chối, logout |
+| `CustomerServiceTests` | Tạo + sinh Mã KH tuần tự, trùng Email, lấy theo Id (kể cả đã xoá mềm), xoá bản ghi không tồn tại, cập nhật + xung đột RowVersion, lọc theo Họ tên, thống kê, xoá hàng loạt, xoá với `If-Match` cũ |
+| `AuthServiceTests` | Đăng nhập đúng/sai, khoá theo (username, IP) và **không khoá IP khác**, bộ đếm reset sau khi hết khoá, rehash mật khẩu, refresh token rotation, **reuse → thu hồi toàn bộ phiên**, dọn token hết hạn, logout |
 | `CreateCustomerRequestValidatorTests` | Email, SĐT, ngày sinh |
-| `AuditLogInterceptorTests` | Ghi Added / Modified (chỉ field thay đổi) / Deleted, thứ tự mới nhất trước |
-| `CustomerImportServiceTests` | Import xlsx/csv hợp lệ (kể cả delimiter `;` + BOM), sinh mã KH tuần tự + audit log qua `AddRange`, file rỗng/sai extension/hỏng/thiếu cột, email sai định dạng, trùng trong file, trùng DB (và không trùng nếu bản ghi gốc đã xoá mềm), vượt `MaxRows`/`MaxFileSizeBytes`, session không tồn tại, rollback all-or-nothing khi dữ liệu đổi giữa preview/confirm, date-serial Excel, template tự parse lại được, import 200 dòng |
+| `AuditLogInterceptorTests` | Ghi Added / Modified / Deleted — cả Modified và Deleted chỉ chứa field thực sự thay đổi; thứ tự mới nhất trước |
+| `CustomerImportServiceTests` | Import xlsx/csv hợp lệ (kể cả delimiter `;` + BOM), sinh mã KH tuần tự + audit log qua `AddRange`, file rỗng/sai extension/hỏng/thiếu cột, email sai định dạng, trùng trong file, trùng DB (và không trùng nếu bản ghi gốc đã xoá mềm), vượt `MaxRows`/`MaxFileSizeBytes`, session không tồn tại, rollback all-or-nothing khi dữ liệu đổi giữa preview/confirm, date-serial Excel, template tự parse lại được, import 200 dòng, lấy toàn bộ mã trong 1 lần gọi sequence, confirm lần 2 → 404, không sửa dữ liệu preview đã cache, từ chối CSV không phải UTF-8, khôi phục số 0 đầu SĐT dạng số |
+
+**9 integration test** (`CustomerManager.IntegrationTests`, SQL Server thật + toàn bộ pipeline WebApi): mã KH 6 chữ số từ sequence, sequence vượt qua dữ liệu có sẵn, 409 trùng Email, dùng lại Email của bản ghi đã xoá mềm (filtered index), 409 RowVersion cũ, 400 RowVersion sai định dạng, audit Deleted chỉ chứa cột thay đổi, `/stats`, 401 khi chưa đăng nhập.
 
 ## VII. Các quyết định kỹ thuật đáng chú ý (giải thích chi tiết bằng comment trong code)
 
@@ -309,11 +319,15 @@ dotnet test
 | `CustomerCode` là clustered index, `Id` (GUID) không clustered | `Infrastructure/Persistence/Configurations/CustomerConfiguration.cs` |
 | Seed admin qua `IHostedService`, không qua migration `HasData()` | `Infrastructure/Authentication/AdminUserSeeder.cs` |
 | ProblemDetails (RFC 7807) thay vì envelope tự chế | `WebApi/ExceptionHandling/GlobalExceptionHandler.cs` |
-| Output Cache optional/pluggable Redis + invalidate theo tag | `WebApi/Program.cs`, `EvictByTagAsync` trong `CustomersController` |
+| Không dùng Output Cache: 1 admin + dữ liệu nhỏ; policy mặc định cũng không cache request có header `Authorization` | — |
+| Lỗi unique của SQL Server (2601/2627) dịch thành `UniqueConstraintViolationException` kèm tên index; chỉ `IX_Customers_Email` mới thành "trùng Email" | `Infrastructure/Persistence/AppDbContext.cs`, `Application/Services/CustomerService.cs` |
+| Validate request tập trung bằng action filter, rule dùng chung cho Create/Update | `WebApi/Filters/FluentValidationFilter.cs`, `Application/Validators/CustomerFieldsValidator.cs` |
+| Cấu hình dạng `IOptions<T>` + `ValidateOnStart`, thời gian qua `TimeProvider` | `WebApi/Program.cs`, `Application/Common/Options` |
 | Access + refresh token chỉ lưu in-memory ở Blazor, không localStorage | `Blazor/Services/TokenProvider.cs` |
 | Tự làm mới phiên trước khi access token hết hạn | `Blazor/Services/SilentRefreshScheduler.cs` |
 | Refresh token: chỉ lưu SHA-256 hash, rotation mỗi lần refresh | `Application/Services/AuthService.cs` |
-| Account lockout sau N lần sai (cấu hình qua `Security:*`) | `Domain/Entities/User.cs`, `Application/Services/AuthService.cs` |
+| Lockout theo (username, IP), không theo tài khoản — tránh DoS admin duy nhất | `Infrastructure/Authentication/MemoryLoginAttemptTracker.cs`, `Application/Services/AuthService.cs` |
+| Một luồng refresh token duy nhất có lock ở Blazor (tránh 2 luồng dùng cùng token → bị coi là reuse) | `Blazor/Services/TokenRefresher.cs` |
 | Security headers (CSP / X-Frame-Options / nosniff), ẩn `Server` header, HSTS ngoài Development | `WebApi/Program.cs` |
 | Không AutoMapper | `Application/Mappings/CustomerMappingExtensions.cs` |
 
@@ -324,11 +338,9 @@ dotnet test
 
 ## IX. Việc còn lại / Possible Improvements
 
-- `CustomerManager.IntegrationTests` với SQL Server thật (Testcontainers) — kiểm tra unique constraint `CustomerCode`/`Email` và ROWVERSION ở mức database (InMemory provider không tái hiện chính xác 2 hành vi này).
-- CI (GitHub Actions) chạy `dotnet build` + `dotnet test` cho mỗi PR.
-- API xoá hàng loạt phía backend (UI hiện gọi lần lượt từng `DELETE`).
+- Bộ đếm lockout và phiên import đang ở `IMemoryCache` — nếu chạy nhiều instance API cần chuyển sang Redis (`IDistributedCache`).
 - Export Excel/CSV, Full-Text Search khi dữ liệu lớn, Microsoft Entra ID.
-- Import: `IMemoryCache` cho phiên preview chỉ phù hợp 1 instance API — nếu scale-out nhiều instance sau này cần đổi sang Redis (`IDistributedCache`, cùng hướng với Output Cache đã hỗ trợ Redis optional). File hiện đọc trọn vào bộ nhớ (bounded bởi `MaxFileSizeBytes`) thay vì streaming — đủ dùng ở quy mô "mini" nhưng không phù hợp nếu nâng giới hạn lên hàng trăm MB. Import chạy đồng bộ trong request; nếu cần hỗ trợ file rất lớn/chạy nền, cân nhắc hàng đợi (background job) thay vì API đồng bộ.
+- Import: `IMemoryCache` cho phiên preview chỉ phù hợp 1 instance API — nếu scale-out nhiều instance sau này cần đổi sang Redis (`IDistributedCache`). File hiện đọc trọn vào bộ nhớ (bounded bởi `MaxFileSizeBytes`) thay vì streaming — đủ dùng ở quy mô "mini" nhưng không phù hợp nếu nâng giới hạn lên hàng trăm MB. Import chạy đồng bộ trong request; nếu cần hỗ trợ file rất lớn/chạy nền, cân nhắc hàng đợi (background job) thay vì API đồng bộ.
 
 ### Đánh đổi bảo mật có chủ đích
 

@@ -91,10 +91,7 @@ public class ClosedXmlCsvCustomerImportFileParser : ICustomerImportFileParser
                 var fullName = row.Cell(columnIndexByHeader["fullname"]).GetString();
                 var email = row.Cell(columnIndexByHeader["email"]).GetString();
 
-                var phoneCell = row.Cell(columnIndexByHeader["phonenumber"]);
-                var phoneNumber = phoneCell.DataType == XLDataType.Text
-                    ? phoneCell.GetString()
-                    : phoneCell.GetFormattedString();
+                var phoneNumber = ReadPhoneNumber(row.Cell(columnIndexByHeader["phonenumber"]));
 
                 var dobCell = row.Cell(columnIndexByHeader["dateofbirth"]);
                 var dateOfBirthRaw = dobCell.DataType == XLDataType.DateTime
@@ -125,12 +122,47 @@ public class ClosedXmlCsvCustomerImportFileParser : ICustomerImportFileParser
         }
     }
 
+    /// <summary>A phone typed into a Number-formatted cell loses its leading
+    /// zero (0912345678 is stored as 912345678). A 9-digit whole number is
+    /// exactly that case, so restore the zero instead of rejecting a row the
+    /// user entered correctly.</summary>
+    private static string ReadPhoneNumber(IXLCell cell)
+    {
+        if (cell.DataType == XLDataType.Text)
+        {
+            return cell.GetString();
+        }
+
+        if (cell.DataType == XLDataType.Number)
+        {
+            var value = cell.GetDouble();
+            if (value >= 100_000_000 && value < 1_000_000_000 && value == Math.Floor(value))
+            {
+                return "0" + ((long)value).ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return cell.GetFormattedString();
+    }
+
     private static async Task<List<ImportRawRow>> ParseCsvAsync(MemoryStream buffer, int maxRows, CancellationToken ct)
     {
+        // Strict UTF-8: Excel's plain "CSV (Comma delimited)" on Vietnamese
+        // Windows writes Windows-1258, not UTF-8. A lenient decoder would turn
+        // every accented letter into U+FFFD, the row would still pass
+        // validation, and the corrupted name would be stored permanently.
+        // Reject with an actionable message instead.
+        var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
         string text;
-        using (var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true))
+        try
         {
+            using var reader = new StreamReader(buffer, strictUtf8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
             text = await reader.ReadToEndAsync(ct);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new ImportFileException(
+                "File CSV không ở định dạng UTF-8. Trong Excel, hãy chọn Save As → 'CSV UTF-8 (Comma delimited)' rồi thử lại.");
         }
 
         if (string.IsNullOrWhiteSpace(text))

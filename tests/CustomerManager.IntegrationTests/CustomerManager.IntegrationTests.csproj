@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>CustomerManager.IntegrationTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.1" />
+    <!-- Real SQL Server in Docker: unique/filtered indexes, ROWVERSION, sequences
+         and raw SQL all behave like production — none of which EF InMemory
+         reproduces. Requires Docker on the machine / CI runner. -->
+    <PackageReference Include="Testcontainers.MsSql" Version="3.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CustomerManager.WebApi\CustomerManager.WebApi.csproj" />
+    <ProjectReference Include="..\..\src\CustomerManager.Infrastructure\CustomerManager.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CustomerManager.Contracts\CustomerManager.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

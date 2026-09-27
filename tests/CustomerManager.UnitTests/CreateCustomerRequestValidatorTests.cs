@@ -8,7 +8,7 @@ namespace CustomerManager.UnitTests;
 
 public class CreateCustomerRequestValidatorTests
 {
-    private readonly CreateCustomerRequestValidator _validator = new();
+    private readonly CreateCustomerRequestValidator _validator = new(TimeProvider.System);
 
     private static CreateCustomerRequest ValidRequest() => new()
     {

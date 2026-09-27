@@ -22,12 +22,14 @@ public class AdminUserSeeder : IHostedService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<AdminUserSeeder> _logger;
 
-    public AdminUserSeeder(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<AdminUserSeeder> logger)
+    public AdminUserSeeder(IServiceScopeFactory scopeFactory, IConfiguration configuration, TimeProvider timeProvider, ILogger<AdminUserSeeder> logger)
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -71,7 +73,7 @@ public class AdminUserSeeder : IHostedService
         }
 
         var passwordHash = passwordHasher.Hash(password);
-        var admin = User.Create(username, passwordHash);
+        var admin = User.Create(username, passwordHash, _timeProvider.GetUtcNow().UtcDateTime);
         context.Users.Add(admin);
         await context.SaveChangesAsync(cancellationToken);
 

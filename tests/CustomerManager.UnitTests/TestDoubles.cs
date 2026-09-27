@@ -1,3 +1,4 @@
+using CustomerManager.Application.Common;
 using CustomerManager.Application.Interfaces;
 using CustomerManager.Domain.Entities;
 using CustomerManager.Infrastructure.Persistence;
@@ -22,7 +23,12 @@ internal class FakePasswordHasherService : IPasswordHasherService
 {
     public string Hash(string password) => $"hashed:{password}";
 
-    public bool Verify(string hashedPassword, string providedPassword) => hashedPassword == Hash(providedPassword);
+    /// <summary>Hashes that start with "legacy:" simulate a hash produced
+    /// with outdated parameters (PasswordVerificationResult.SuccessRehashNeeded).</summary>
+    public PasswordCheckResult Verify(string hashedPassword, string providedPassword) =>
+        hashedPassword == Hash(providedPassword) ? PasswordCheckResult.Success
+        : hashedPassword == $"legacy:{providedPassword}" ? PasswordCheckResult.SuccessRehashNeeded
+        : PasswordCheckResult.Failed;
 }
 
 internal class FakeJwtTokenGenerator : IJwtTokenGenerator
@@ -32,13 +38,38 @@ internal class FakeJwtTokenGenerator : IJwtTokenGenerator
 }
 
 /// <summary>In-memory stand-in for SqlSequenceCustomerCodeGenerator — hands out
-/// "KH-0001", "KH-0002", ... in call order, without needing a real SQL Server
-/// sequence (SqlQueryRaw isn't supported by the InMemory provider).</summary>
+/// "KH-000001", "KH-000002", ... in call order, without needing a real SQL
+/// Server sequence (raw SQL isn't supported by the InMemory provider).</summary>
 internal class FakeCustomerCodeGenerator : ICustomerCodeGenerator
 {
-    private int _next = 1;
+    private long _next = 1;
 
-    public Task<string> NextAsync(CancellationToken ct) => Task.FromResult($"KH-{_next++:D4}");
+    public int RangeCalls { get; private set; }
+
+    public Task<string> NextAsync(CancellationToken ct) => Task.FromResult(CustomerCodeFormat.Format(_next++));
+
+    public Task<IReadOnlyList<string>> NextRangeAsync(int count, CancellationToken ct)
+    {
+        RangeCalls++;
+        IReadOnlyList<string> codes = Enumerable.Range(0, count).Select(_ => CustomerCodeFormat.Format(_next++)).ToList();
+        return Task.FromResult(codes);
+    }
+}
+
+/// <summary>TimeProvider whose clock only moves when a test says so — lockout
+/// and token-expiry tests advance it instead of sleeping.</summary>
+internal sealed class ManualTimeProvider : TimeProvider
+{
+    private DateTimeOffset _now;
+
+    public ManualTimeProvider(DateTimeOffset? start = null)
+    {
+        _now = start ?? new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero);
+    }
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan by) => _now = _now.Add(by);
 }
 
 /// <summary>
@@ -59,14 +90,15 @@ internal class FakeCustomerCodeGenerator : ICustomerCodeGenerator
 /// </summary>
 internal static class TestDbContextFactory
 {
-    public static AppDbContext Create(string? currentUsername = "test-admin")
+    public static AppDbContext Create(string? currentUsername = "test-admin", TimeProvider? timeProvider = null)
     {
         var currentUserService = new FakeCurrentUserService(currentUsername);
+        var clock = timeProvider ?? TimeProvider.System;
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .AddInterceptors(
-                new SoftDeleteAndAuditInterceptor(currentUserService),
-                new AuditLogInterceptor(currentUserService))
+                new SoftDeleteAndAuditInterceptor(currentUserService, clock),
+                new AuditLogInterceptor(currentUserService, clock))
             .Options;
 
         return new AppDbContext(options);

@@ -1,6 +1,8 @@
 @page "/customers/{Id:guid}"
 @attribute [Authorize]
+@using System.Text.Encodings.Web
 @using System.Text.Json
+@using System.Text.Unicode
 @inject ICustomerApiService CustomerApiService
 @inject NavigationManager Navigation
 @inject IDialogService DialogService
@@ -136,10 +138,20 @@ else if (_customer is not null)
     private List<AuditLogDto> _auditLogs = new();
     private bool _isLoadingAuditLogs = true;
 
-    protected override async Task OnInitializedAsync()
+    private Guid? _loadedId;
+
+    /// <summary>OnParametersSet (not OnInitialized): navigating from
+    /// /customers/{a} to /customers/{b} reuses this component instance, and
+    /// OnInitialized would keep showing customer a.</summary>
+    protected override async Task OnParametersSetAsync()
     {
-        await LoadAsync();
-        await LoadAuditLogsAsync();
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        await Task.WhenAll(LoadAsync(), LoadAuditLogsAsync());
     }
 
     private async Task LoadAsync()
@@ -187,6 +199,16 @@ else if (_customer is not null)
         _ => action
     };
 
+    /// <summary>The default encoder escapes every non-ASCII character, which
+    /// turned "Nguyễn" into "Nguy\u1EC5n" in the history panel. Razor
+    /// HTML-encodes the rendered text anyway, so JSON-level escaping adds no
+    /// safety here.</summary>
+    private static readonly JsonSerializerOptions PrettyJson = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+    };
+
     private static string FormatJson(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -197,7 +219,7 @@ else if (_customer is not null)
         try
         {
             using var document = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
+            return JsonSerializer.Serialize(document, PrettyJson);
         }
         catch (JsonException)
         {
@@ -214,7 +236,8 @@ else if (_customer is not null)
         if (result is { Canceled: false })
         {
             Snackbar.Add("Đã cập nhật khách hàng.", Severity.Success);
-            await LoadAsync();
+            // The edit just wrote a new audit entry — refresh both panels.
+            await Task.WhenAll(LoadAsync(), LoadAuditLogsAsync());
         }
     }
 }

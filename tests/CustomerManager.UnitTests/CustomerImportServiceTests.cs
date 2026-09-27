@@ -6,32 +6,34 @@ using CustomerManager.Application.Validators;
 using CustomerManager.Contracts.Customers.Import;
 using CustomerManager.Infrastructure.Persistence.Imports;
 using FluentAssertions;
+using CustomerManager.Application.Common.Options;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CustomerManager.UnitTests;
 
 public class CustomerImportServiceTests
 {
-    private static IConfiguration TestConfiguration(int maxRows = 10_000, long maxFileSizeBytes = 5 * 1024 * 1024) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Import:MaxRows"] = maxRows.ToString(),
-                ["Import:MaxFileSizeBytes"] = maxFileSizeBytes.ToString(),
-                ["Import:SessionExpiryMinutes"] = "15"
-            })
-            .Build();
+    private static ImportOptions TestConfiguration(int maxRows = 10_000, long maxFileSizeBytes = 5 * 1024 * 1024) => new()
+    {
+        MaxRows = maxRows,
+        MaxFileSizeBytes = maxFileSizeBytes,
+        SessionExpiryMinutes = 15
+    };
 
-    private static CustomerImportService CreateSut(CustomerManager.Infrastructure.Persistence.AppDbContext context, IConfiguration? configuration = null) => new(
+    private static CustomerImportService CreateSut(
+        CustomerManager.Infrastructure.Persistence.AppDbContext context,
+        ImportOptions? options = null,
+        FakeCustomerCodeGenerator? codeGenerator = null) => new(
         context,
-        new FakeCustomerCodeGenerator(),
+        codeGenerator ?? new FakeCustomerCodeGenerator(),
         new ClosedXmlCsvCustomerImportFileParser(),
         new ClosedXmlCustomerImportWorkbookWriter(),
-        new CreateCustomerRequestValidator(),
+        new CreateCustomerRequestValidator(TimeProvider.System),
         new MemoryCache(new MemoryCacheOptions()),
-        configuration ?? TestConfiguration());
+        Options.Create(options ?? TestConfiguration()),
+        TimeProvider.System);
 
     private static byte[] BuildXlsx(
         IEnumerable<(string FullName, string Email, string Phone, string Dob)> rows,
@@ -111,7 +113,7 @@ public class CustomerImportServiceTests
 
         result.Success.Should().BeTrue();
         result.ImportedRows.Should().Be(2);
-        context.Customers.Select(c => c.CustomerCode).OrderBy(c => c).Should().Equal("KH-0001", "KH-0002");
+        context.Customers.Select(c => c.CustomerCode).OrderBy(c => c).Should().Equal("KH-000001", "KH-000002");
         context.AuditLogs.Count(a => a.Action == "Added").Should().Be(2);
     }
 
@@ -229,7 +231,7 @@ public class CustomerImportServiceTests
             DateOfBirth = new DateOnly(1990, 1, 1),
             IsActive = true
         }, CancellationToken.None);
-        await customerService.DeleteAsync(deleted.Id, CancellationToken.None);
+        await customerService.DeleteAsync(deleted.Id, null, CancellationToken.None);
 
         var sut = CreateSut(context);
         var bytes = BuildXlsx(new[]
@@ -248,7 +250,7 @@ public class CustomerImportServiceTests
     public async Task PreviewAsync_ShouldThrow_WhenRowCountExceedsMaxRows()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = CreateSut(context, TestConfiguration(maxRows: 2));
+        var sut = CreateSut(context, options: TestConfiguration(maxRows: 2));
         var bytes = BuildXlsx(new[] { Row(1), Row(2), Row(3) });
 
         var act = () => sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
@@ -260,7 +262,7 @@ public class CustomerImportServiceTests
     public async Task PreviewAsync_ShouldThrow_WhenFileExceedsMaxSize()
     {
         await using var context = TestDbContextFactory.Create();
-        var sut = CreateSut(context, TestConfiguration(maxFileSizeBytes: 10));
+        var sut = CreateSut(context, options: TestConfiguration(maxFileSizeBytes: 10));
         var bytes = BuildXlsx(new[] { Row(1) });
 
         var act = () => sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
@@ -358,5 +360,102 @@ public class CustomerImportServiceTests
 
         result.ImportedRows.Should().Be(200);
         context.Customers.Count().Should().Be(200);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_ShouldReserveAllCodes_InOneRangeCall()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var generator = new FakeCustomerCodeGenerator();
+        var sut = CreateSut(context, codeGenerator: generator);
+        var bytes = BuildXlsx(Enumerable.Range(1, 5).Select(Row));
+        var preview = await sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
+
+        await sut.ConfirmAsync(preview.ImportSessionId, CancellationToken.None);
+
+        generator.RangeCalls.Should().Be(1);
+        context.Customers.Count().Should().Be(5);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_ShouldReturnNotFound_WhenSessionAlreadyConfirmed()
+    {
+        // A consumed session must never import the same rows twice.
+        await using var context = TestDbContextFactory.Create();
+        var sut = CreateSut(context);
+        var bytes = BuildXlsx(new[] { Row(1) });
+        var preview = await sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
+
+        await sut.ConfirmAsync(preview.ImportSessionId, CancellationToken.None);
+        var again = () => sut.ConfirmAsync(preview.ImportSessionId, CancellationToken.None);
+
+        await again.Should().ThrowAsync<NotFoundException>();
+        context.Customers.Count().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_ShouldNotMutateCachedPreviewRows_WhenRejectingConflicts()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var sut = CreateSut(context);
+        var bytes = BuildXlsx(new[] { Row(1), Row(2) });
+        var preview = await sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
+        var originalRow = preview.Rows.Single(r => r.RowNumber == 2);
+
+        await new CustomerService(context, new FakeCustomerCodeGenerator()).CreateAsync(new()
+        {
+            FullName = "Raced In First",
+            Email = "customer1@example.com",
+            PhoneNumber = "0900000077",
+            DateOfBirth = new DateOnly(1990, 1, 1)
+        }, CancellationToken.None);
+
+        var act = () => sut.ConfirmAsync(preview.ImportSessionId, CancellationToken.None);
+        var ex = (await act.Should().ThrowAsync<ImportValidationFailedException>()).Which;
+
+        ex.Errors.Should().ContainSingle(r => r.RowNumber == 2 && r.Status == ImportRowStatus.DuplicateInDatabase);
+        originalRow.Status.Should().Be(ImportRowStatus.Valid); // object returned by Preview untouched
+        originalRow.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ShouldRejectCsv_ThatIsNotUtf8()
+    {
+        // "Nguyễn" encoded as Windows-1258-style single bytes — invalid UTF-8.
+        await using var context = TestDbContextFactory.Create();
+        var sut = CreateSut(context);
+        var header = Encoding.ASCII.GetBytes("FullName,Email,PhoneNumber,DateOfBirth\n");
+        var row = Encoding.ASCII.GetBytes("Nguy").Concat(new byte[] { 0xD2, 0xEA }).Concat(Encoding.ASCII.GetBytes("n,a@example.com,0900000001,15/01/1990\n")).ToArray();
+        var bytes = header.Concat(row).ToArray();
+
+        var act = () => sut.PreviewAsync(new MemoryStream(bytes), "customers.csv", bytes.Length, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ImportFileException>()).WithMessage("*UTF-8*");
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ShouldRestoreLeadingZero_WhenPhoneStoredAsNumber()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var sut = CreateSut(context);
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.Worksheets.Add("Sheet1");
+        sheet.Cell(1, 1).Value = "FullName";
+        sheet.Cell(1, 2).Value = "Email";
+        sheet.Cell(1, 3).Value = "PhoneNumber";
+        sheet.Cell(1, 4).Value = "DateOfBirth";
+        sheet.Cell(2, 1).Value = "Nguyen Van So";
+        sheet.Cell(2, 2).Value = "so@example.com";
+        sheet.Cell(2, 3).Value = 912345678d; // what Excel stores when "0912345678" is typed into a Number cell
+        sheet.Cell(2, 4).Value = "15/01/1990";
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        var bytes = stream.ToArray();
+
+        var result = await sut.PreviewAsync(new MemoryStream(bytes), "customers.xlsx", bytes.Length, CancellationToken.None);
+
+        result.InvalidRows.Should().Be(0);
+        result.Rows.Single().PhoneNumber.Should().Be("0912345678");
     }
 }

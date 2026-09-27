@@ -6,6 +6,24 @@
 
 ---
 
+## 0.3 Ghi chú v5 — sửa theo code review (2026-09-27, branch `fix/review-findings`)
+
+**Khi mâu thuẫn với các mục bên dưới (kể cả 0.2), mục này là bản đúng.**
+
+| Hạng mục | Trước | Sau |
+|---|---|---|
+| Output Cache | Mô tả ở §10, §16 #3, bảng API 0.2 | **Đã gỡ khỏi code** (commit `79459d8`). Không cần với 1 admin + dữ liệu nhỏ; policy mặc định cũng không cache request có `Authorization` |
+| Account lockout | Theo tài khoản (cột `Users.FailedLoginAttempts/LockedOutUntil`); không reset sau khi hết hạn | Theo cặp **(username, IP)** trong `IMemoryCache`, reset khi hết hạn — kẻ tấn công không khoá được admin duy nhất. Hai cột bị xoá ở migration `ReviewFixes` |
+| Refresh token | Rotation | Rotation + **reuse detection** (dùng lại token đã xoay → thu hồi mọi phiên) + dọn token hết hạn |
+| Mã KH | `KH-0001` (4 số), sequence bắt đầu từ 1 kể cả khi DB đã có dữ liệu | `KH-000001` (6 số); migration `ReviewFixes` đổi dữ liệu cũ và **restart sequence sau mã lớn nhất** |
+| Lỗi unique | Mọi `DbUpdateException` → "trùng Email" | Chỉ vi phạm `IX_Customers_Email` → 409 trùng Email; lỗi khác → 500 + log |
+| Soft delete | `State = Modified` (mọi cột bị đánh dấu sửa, audit "Deleted" chứa mọi field) | Chỉ cột `IsDeleted` bị sửa |
+| Index | `IX_Customers_IsDeleted` | `IX_Customers_CreatedAt_Active` (CreatedAt DESC, filter `IsDeleted = 0`) |
+| Endpoint mới | — | `GET /api/customers/stats`, `POST /api/customers/bulk-delete`, `DELETE` hỗ trợ `If-Match` |
+| Test | Unit test (InMemory) | + `CustomerManager.IntegrationTests` (Testcontainers SQL Server) + CI GitHub Actions |
+
+---
+
 ## 0.2 Ghi chú v4 — đồng bộ với code đã triển khai (2026-09-17)
 
 ### Thay đổi so với thiết kế v3
@@ -85,7 +103,7 @@ erDiagram
 | POST | `/api/auth/login` | Anonymous + rate limit | 200 / 400 / 401 / 423 / 429 |
 | POST | `/api/auth/refresh` | Anonymous + rate limit | 200 / 401 / 429 |
 | POST | `/api/auth/logout` | Anonymous | 204 |
-| GET | `/api/customers` | Bearer | 200 (Output Cache 30s, tag `customers`) |
+| GET | `/api/customers` | Bearer | 200 (Output Cache đã gỡ — xem 0.3) |
 | GET | `/api/customers/{id}` | Bearer | 200 / 404 |
 | GET | `/api/customers/{id}/audit-logs` | Bearer | 200 |
 | POST | `/api/customers` | Bearer | 201 / 400 / 409 |

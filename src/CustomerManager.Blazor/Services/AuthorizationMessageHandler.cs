@@ -1,37 +1,39 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using CustomerManager.Contracts.Auth;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 
 namespace CustomerManager.Blazor.Services;
 
 /// <summary>
-/// HttpClient "middleware": attaches Authorization: Bearer &lt;token&gt; to every
-/// outgoing request automatically, refreshing first if the token has already
-/// expired (e.g. SilentRefreshScheduler's timer was throttled by a backgrounded
-/// tab — Issue M6), and — if the API still comes back 401 — clears the session
-/// and sends the admin back to /login instead of leaving the UI silently stuck
-/// in a "logged in" state that every subsequent call will also 401 on.
+/// HttpClient "middleware" for the authenticated API client: attaches
+/// Authorization: Bearer &lt;token&gt;, refreshes first (via TokenRefresher) if
+/// the token has already expired, and — if the API still answers 401 — ends
+/// the session and sends the admin to /login.
+///
+/// Auth endpoints (/api/auth/*) are never routed through here (AuthApiService
+/// uses the raw client), and are ignored defensively if they are: a 401 from
+/// /api/auth/login means "wrong password", not "session expired", and must not
+/// trigger a redirect.
 /// </summary>
 public class AuthorizationMessageHandler : DelegatingHandler
 {
-    private static readonly SemaphoreSlim RefreshLock = new(1, 1);
-
     private readonly TokenProvider _tokenProvider;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TokenRefresher _tokenRefresher;
+    private readonly SilentRefreshScheduler _silentRefreshScheduler;
     private readonly CustomAuthStateProvider _authStateProvider;
     private readonly NavigationManager _navigation;
 
     public AuthorizationMessageHandler(
         TokenProvider tokenProvider,
-        IHttpClientFactory httpClientFactory,
+        TokenRefresher tokenRefresher,
+        SilentRefreshScheduler silentRefreshScheduler,
         AuthenticationStateProvider authStateProvider,
         NavigationManager navigation)
     {
         _tokenProvider = tokenProvider;
-        _httpClientFactory = httpClientFactory;
+        _tokenRefresher = tokenRefresher;
+        _silentRefreshScheduler = silentRefreshScheduler;
         // Registered as the single implementation of AuthenticationStateProvider
         // in Program.cs, so this cast is safe within this app.
         _authStateProvider = (CustomAuthStateProvider)authStateProvider;
@@ -40,9 +42,18 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        if (IsAuthEndpoint(request))
+        {
+            return await base.SendAsync(request, cancellationToken);
+        }
+
         if (!_tokenProvider.HasValidToken && _tokenProvider.RefreshToken is not null)
         {
-            await TryRefreshAsync(cancellationToken);
+            // e.g. the scheduler's timer was throttled in a background tab.
+            if (await _tokenRefresher.RefreshAsync(cancellationToken) && _tokenProvider.ExpiresAtUtc is { } expiresAt)
+            {
+                _silentRefreshScheduler.ScheduleFor(expiresAt);
+            }
         }
 
         if (_tokenProvider.HasValidToken)
@@ -54,51 +65,20 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
+            _silentRefreshScheduler.Cancel();
             _tokenProvider.Clear();
             _authStateProvider.NotifyAuthenticationStateChanged();
 
-            var returnUrl = Uri.EscapeDataString(_navigation.ToBaseRelativePath(_navigation.Uri));
-            _navigation.NavigateTo($"/login?returnUrl=/{returnUrl}");
+            var currentPath = "/" + _navigation.ToBaseRelativePath(_navigation.Uri);
+            if (!currentPath.StartsWith("/login", StringComparison.OrdinalIgnoreCase))
+            {
+                _navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(currentPath)}");
+            }
         }
 
         return response;
     }
 
-    private async Task TryRefreshAsync(CancellationToken ct)
-    {
-        await RefreshLock.WaitAsync(ct);
-        try
-        {
-            // Re-check: another request may have already refreshed while this
-            // one was waiting for the lock.
-            if (_tokenProvider.HasValidToken || _tokenProvider.RefreshToken is null)
-            {
-                return;
-            }
-
-            var client = _httpClientFactory.CreateClient("CustomerManagerApiRaw");
-            var response = await client.PostAsJsonAsync(
-                "api/auth/refresh",
-                new RefreshTokenRequest { RefreshToken = _tokenProvider.RefreshToken },
-                ct);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadFromJsonAsync<LoginResponse>(cancellationToken: ct);
-                if (result is not null)
-                {
-                    _tokenProvider.SetToken(result.Token, result.ExpiresAtUtc, result.RefreshToken);
-                }
-            }
-        }
-        catch (HttpRequestException)
-        {
-            // Network hiccup — fall through and let the request go out
-            // unauthenticated; the 401 handling above will redirect to login.
-        }
-        finally
-        {
-            RefreshLock.Release();
-        }
-    }
+    private static bool IsAuthEndpoint(HttpRequestMessage request) =>
+        request.RequestUri?.AbsolutePath.Contains("/api/auth/", StringComparison.OrdinalIgnoreCase) == true;
 }

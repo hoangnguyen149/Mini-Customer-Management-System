@@ -167,8 +167,18 @@
 
     private void OnFileChanged(IBrowserFile file)
     {
-        _selectedFile = file;
         _errorMessage = null;
+
+        // Checked here, before any read: IBrowserFile.OpenReadStream throws an
+        // IOException for oversize files, which used to crash the dialog.
+        if (file.Size > CustomerImportApiService.MaxFileSizeBytes)
+        {
+            _selectedFile = null;
+            _errorMessage = $"File \"{file.Name}\" ({FormatSize(file.Size)}) vượt quá giới hạn {FormatSize(CustomerImportApiService.MaxFileSizeBytes)}.";
+            return;
+        }
+
+        _selectedFile = file;
     }
 
     private async Task DownloadTemplateAsync()

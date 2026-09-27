@@ -5,94 +5,58 @@ using Microsoft.JSInterop;
 
 namespace CustomerManager.Blazor.Services;
 
-public class CustomerImportApiService : ICustomerImportApiService
+public class CustomerImportApiService : ApiClientBase, ICustomerImportApiService
 {
-    private const string TemplateContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-    /// <summary>Matches Import:MaxFileSizeBytes' documented default
-    /// (5 MB, see appsettings.json) — the actual limit is enforced
-    /// server-side; this only bounds how much IBrowserFile.OpenReadStream()
-    /// is willing to buffer client-side before the request is even sent.</summary>
-    private const long MaxBrowserFileSizeBytes = 5 * 1024 * 1024;
+    /// <summary>Client-side guard only; the server enforces Import:MaxFileSizeBytes
+    /// independently. Kept equal to the server default (5 MB).</summary>
+    public const long MaxFileSizeBytes = 5 * 1024 * 1024;
 
-    private readonly HttpClient _httpClient;
     private readonly IJSRuntime _jsRuntime;
 
-    public CustomerImportApiService(HttpClient httpClient, IJSRuntime jsRuntime)
+    public CustomerImportApiService(HttpClient httpClient, IJSRuntime jsRuntime) : base(httpClient)
     {
-        _httpClient = httpClient;
         _jsRuntime = jsRuntime;
     }
 
     public async Task DownloadTemplateAsync(CancellationToken ct = default)
     {
-        var response = await _httpClient.GetAsync("api/customers/import/template", ct);
-        await EnsureSuccessAsync(response);
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        await SaveAsync("customer-import-template.xlsx", bytes);
+        var response = await SendAsync(() => Http.GetAsync("api/customers/import/template", ct));
+        await SaveAsync("customer-import-template.xlsx", await response.Content.ReadAsByteArrayAsync(ct));
     }
 
     public async Task<ImportPreviewResponse> PreviewAsync(IBrowserFile file, CancellationToken ct = default)
     {
+        if (file.Size > MaxFileSizeBytes)
+        {
+            // OpenReadStream(max) would throw IOException for this — surface it
+            // as a normal, displayable error instead.
+            throw new ApiException($"File vượt quá kích thước tối đa {MaxFileSizeBytes / 1024 / 1024} MB.", 400);
+        }
+
         using var content = new MultipartFormDataContent();
-        using var fileStream = file.OpenReadStream(MaxBrowserFileSizeBytes, ct);
+        await using var fileStream = file.OpenReadStream(MaxFileSizeBytes, ct);
         using var streamContent = new StreamContent(fileStream);
         streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
             string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType);
         content.Add(streamContent, "file", file.Name);
 
-        var response = await _httpClient.PostAsync("api/customers/import/preview", content, ct);
-        await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<ImportPreviewResponse>(cancellationToken: ct))!;
+        return await SendAsync<ImportPreviewResponse>(() => Http.PostAsync("api/customers/import/preview", content, ct), ct);
     }
 
-    public async Task<ImportConfirmResponse> ConfirmAsync(Guid importSessionId, CancellationToken ct = default)
-    {
-        var response = await _httpClient.PostAsJsonAsync(
+    public Task<ImportConfirmResponse> ConfirmAsync(Guid importSessionId, CancellationToken ct = default) =>
+        SendAsync<ImportConfirmResponse>(() => Http.PostAsJsonAsync(
             "api/customers/import/confirm",
             new ImportConfirmRequest { ImportSessionId = importSessionId },
-            ct);
-        await EnsureSuccessAsync(response);
-        return (await response.Content.ReadFromJsonAsync<ImportConfirmResponse>(cancellationToken: ct))!;
-    }
+            ct), ct);
 
     public async Task DownloadErrorReportAsync(Guid importSessionId, CancellationToken ct = default)
     {
-        var response = await _httpClient.GetAsync($"api/customers/import/{importSessionId}/error-report", ct);
-        await EnsureSuccessAsync(response);
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        await SaveAsync("import-errors.xlsx", bytes);
+        var response = await SendAsync(() => Http.GetAsync($"api/customers/import/{importSessionId}/error-report", ct));
+        await SaveAsync("import-errors.xlsx", await response.Content.ReadAsByteArrayAsync(ct));
     }
 
     private Task SaveAsync(string fileName, byte[] bytes) =>
-        _jsRuntime.InvokeVoidAsync("fileDownload.save", fileName, Convert.ToBase64String(bytes), TemplateContentType).AsTask();
-
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response)
-    {
-        if (response.IsSuccessStatusCode)
-        {
-            return;
-        }
-
-        var message = $"Yêu cầu thất bại (mã lỗi {(int)response.StatusCode}).";
-        try
-        {
-            var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsResponse>();
-            if (problem is not null)
-            {
-                message = problem.Detail ?? problem.Title ?? message;
-                if (problem.Errors is { Count: > 0 })
-                {
-                    message += " " + string.Join(" ", problem.Errors.SelectMany(kv => kv.Value));
-                }
-            }
-        }
-        catch
-        {
-            // Response body wasn't ProblemDetails JSON (e.g. a file response) —
-            // fall back to the generic message above.
-        }
-
-        throw new ApiException(message, (int)response.StatusCode);
-    }
+        _jsRuntime.InvokeVoidAsync("fileDownload.save", fileName, Convert.ToBase64String(bytes), XlsxContentType).AsTask();
 }

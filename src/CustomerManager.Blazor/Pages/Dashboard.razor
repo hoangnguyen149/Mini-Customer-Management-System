@@ -105,10 +105,8 @@
         await LoadStatsAsync();
     }
 
-    /// <summary>Reads only TotalCount from three cheap PageSize=1 calls — no new
-    /// backend endpoint, no fetching/counting full customer data client-side.
-    /// "New this month" from the master prompt is deliberately omitted: the list
-    /// DTO doesn't expose CreatedAt, and faking it would violate "no fake data".</summary>
+    /// <summary>One GET /api/customers/stats (a single GROUP BY on the server)
+    /// instead of three paged list calls.</summary>
     private async Task LoadStatsAsync()
     {
         _isLoading = true;
@@ -117,15 +115,11 @@
 
         try
         {
-            var totalTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1 });
-            var activeTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1, IsActive = true });
-            var inactiveTask = CustomerApiService.GetPagedAsync(new CustomerQueryParameters { PageSize = 1, IsActive = false });
+            var stats = await CustomerApiService.GetStatsAsync();
 
-            await Task.WhenAll(totalTask, activeTask, inactiveTask);
-
-            _totalCount = totalTask.Result.TotalCount;
-            _activeCount = activeTask.Result.TotalCount;
-            _inactiveCount = inactiveTask.Result.TotalCount;
+            _totalCount = stats.Total;
+            _activeCount = stats.Active;
+            _inactiveCount = stats.Inactive;
             _activeRate = _totalCount == 0 ? 0 : (int)Math.Round(_activeCount * 100.0 / _totalCount);
         }
         catch (ApiException)

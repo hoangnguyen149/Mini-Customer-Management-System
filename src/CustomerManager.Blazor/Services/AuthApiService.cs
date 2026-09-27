@@ -4,6 +4,11 @@ using Microsoft.AspNetCore.Components.Authorization;
 
 namespace CustomerManager.Blazor.Services;
 
+/// <summary>
+/// Uses the raw HttpClient (no AuthorizationMessageHandler): a 401 from
+/// /api/auth/login means "wrong password" and must be shown on the login form,
+/// not treated as an expired session that redirects away from it.
+/// </summary>
 public class AuthApiService : IAuthApiService
 {
     private readonly HttpClient _httpClient;
@@ -12,12 +17,12 @@ public class AuthApiService : IAuthApiService
     private readonly SilentRefreshScheduler _silentRefreshScheduler;
 
     public AuthApiService(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
         TokenProvider tokenProvider,
         AuthenticationStateProvider authStateProvider,
         SilentRefreshScheduler silentRefreshScheduler)
     {
-        _httpClient = httpClient;
+        _httpClient = httpClientFactory.CreateClient(HttpClientNames.Raw);
         _tokenProvider = tokenProvider;
         // Registered as the single implementation of AuthenticationStateProvider
         // in Program.cs, so this cast is safe within this app.
@@ -27,15 +32,23 @@ public class AuthApiService : IAuthApiService
 
     public async Task<string?> LoginAsync(string username, string password)
     {
-        var response = await _httpClient.PostAsJsonAsync("api/auth/login", new LoginRequest
+        HttpResponseMessage response;
+        try
         {
-            Username = username,
-            Password = password
-        });
+            response = await _httpClient.PostAsJsonAsync("api/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password
+            });
+        }
+        catch (HttpRequestException)
+        {
+            return ApiClientBase.ServerUnreachableMessage;
+        }
 
         if (!response.IsSuccessStatusCode)
         {
-            return await ExtractErrorMessageAsync(response);
+            return await ApiClientBase.ReadErrorMessageAsync(response, "Tên đăng nhập hoặc mật khẩu không đúng.");
         }
 
         var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
@@ -54,17 +67,13 @@ public class AuthApiService : IAuthApiService
     {
         _silentRefreshScheduler.Cancel();
 
-        if (_tokenProvider.RefreshToken is not null)
+        if (_tokenProvider.RefreshToken is { } refreshToken)
         {
             try
             {
-                // Best-effort: revoke server-side so the refresh token can't be
-                // replayed later. A network failure here must not block the
-                // client-side logout that follows.
-                await _httpClient.PostAsJsonAsync("api/auth/logout", new RefreshTokenRequest
-                {
-                    RefreshToken = _tokenProvider.RefreshToken
-                });
+                // Best-effort server-side revoke; a network failure must not
+                // block the client-side logout below.
+                await _httpClient.PostAsJsonAsync("api/auth/logout", new RefreshTokenRequest { RefreshToken = refreshToken });
             }
             catch (HttpRequestException)
             {
@@ -73,23 +82,5 @@ public class AuthApiService : IAuthApiService
 
         _tokenProvider.Clear();
         _authStateProvider.NotifyAuthenticationStateChanged();
-    }
-
-    private static async Task<string> ExtractErrorMessageAsync(HttpResponseMessage response)
-    {
-        try
-        {
-            var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsResponse>();
-            if (problem?.Detail is not null)
-            {
-                return problem.Detail;
-            }
-        }
-        catch
-        {
-            // Response body wasn't ProblemDetails JSON — fall back below.
-        }
-
-        return "Tên đăng nhập hoặc mật khẩu không đúng.";
     }
 }

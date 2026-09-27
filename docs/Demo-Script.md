@@ -18,7 +18,7 @@ Nói ngắn gọn: tên hệ thống, stack công nghệ (ASP.NET Core 8 Web API
 
 1. Mở trình duyệt tại trang Login (giao diện 2 cột theo nhận diện CEP). Chỉ nhanh nút ẩn/hiện mật khẩu và ô "Ghi nhớ đăng nhập".
 2. Thử đăng nhập sai mật khẩu — chỉ ra thông báo "Tên đăng nhập hoặc mật khẩu không đúng." (401), không lộ "sai username" hay "sai password" (quyết định bảo mật chủ động, chống dò tài khoản).
-3. (Tuỳ chọn, nên quay cuối video vì sẽ khoá tài khoản 15 phút) Sai liên tiếp 5 lần — chỉ ra thông báo "Tài khoản tạm khoá do đăng nhập sai nhiều lần. Vui lòng thử lại sau 15 phút." (423 Locked). Lưu ý: rate limit cũng là 5 request/phút/IP, nếu vượt sẽ nhận 429 trước.
+3. (Tuỳ chọn, nên quay cuối video vì IP của máy quay sẽ bị khoá 15 phút) Sai liên tiếp 5 lần — chỉ ra thông báo "Đăng nhập tạm khoá do nhập sai nhiều lần từ thiết bị này. Vui lòng thử lại sau 15 phút." (423 Locked). Giải thích: khoá theo cặp (username, IP) nên kẻ tấn công không thể khoá admin duy nhất từ máy khác. Lưu ý: rate limit cũng là 5 request/phút/IP, nếu vượt sẽ nhận 429 trước.
 4. Đăng nhập đúng tài khoản admin đã seed — hệ thống chuyển sang Dashboard.
 5. Mở DevTools > Application > Local Storage — chứng minh **không có JWT hay refresh token** nào bị lưu ở đó (chỉ có username "ghi nhớ" và theme). Token chỉ nằm trong bộ nhớ, giảm rủi ro XSS đọc token.
 6. Chỉ badge "Phiên an toàn" trên AppBar và nói ngắn: access token chỉ sống 15 phút, Blazor tự gọi `POST /api/auth/refresh` khoảng 2 phút trước khi hết hạn nên người dùng không bị đăng xuất giữa chừng; refresh token được xoay vòng và DB chỉ lưu SHA-256 hash.
@@ -94,14 +94,14 @@ Nhấn `Ctrl+K` — mở bảng lệnh nhanh: Dashboard, Khách hàng, Thêm kh�
 
 ## 12. Kết (15-20s)
 
-Tóm tắt: CRUD đầy đủ, tìm kiếm/lọc, validation, xác thực JWT + refresh token + khoá tài khoản, xử lý xung đột cập nhật, soft delete, audit log đầy đủ, giao diện MudBlazor (Dashboard, dark mode, Command Palette), 34 unit test. Nhắc tới tài liệu đi kèm: `docs/System-Analysis-Phase1.md`, `docs/PHAN-TICH-VA-KE-HOACH.docx`, `docs/Estimation-WBS.xlsx`, `postman/CustomerManager.postman_collection.json`.
+Tóm tắt: CRUD đầy đủ, tìm kiếm/lọc, validation, xác thực JWT + refresh token (phát hiện token bị dùng lại) + khoá đăng nhập theo IP, xử lý xung đột cập nhật, soft delete, audit log đầy đủ, giao diện MudBlazor (Dashboard, dark mode, Command Palette), 64 unit test + 9 integration test (SQL Server thật qua Testcontainers), CI GitHub Actions. Nhắc tới tài liệu đi kèm: `docs/System-Analysis-Phase1.md`, `docs/PHAN-TICH-VA-KE-HOACH.docx`, `docs/Estimation-WBS.xlsx`, `postman/CustomerManager.postman_collection.json`.
 
 ---
 
 ## Ghi chú kỹ thuật khi quay
 
 - Chạy `dotnet build` và `dotnet test` một lần trước khi quay để chắc môi trường ổn định — không quay quá trình cài đặt/debug.
-- Nếu demo khoá tài khoản (mục 1.3), quay đoạn đó **cuối cùng** hoặc chuẩn bị sẵn cách mở khoá: đợi 15 phút, hoặc tạm đặt `Security:LockoutDurationMinutes` = 1 bằng User Secrets rồi restart API.
+- Nếu demo khoá đăng nhập (mục 1.3), quay đoạn đó **cuối cùng** hoặc chuẩn bị sẵn cách mở khoá: restart API (bộ đếm lưu in-memory), đợi 15 phút, hoặc tạm đặt `Security:LockoutDurationMinutes` = 1 bằng User Secrets.
 - Muốn quay nhanh cảnh silent refresh: tạm đặt `Jwt:ExpiryMinutes` = 3 rồi restart API, mở tab Network và đợi request `refresh` tự xuất hiện. Nhớ trả lại giá trị 15 sau khi quay.
 - Quay tối thiểu 1080p, có thuyết minh để người xem hiểu đang thao tác gì.
 - Chỉ cần quay xen kẽ cửa sổ trình duyệt, Postman và SSMS theo đúng thứ tự trên, không cần dựng phức tạp.
