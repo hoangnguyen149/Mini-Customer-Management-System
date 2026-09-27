@@ -30,6 +30,7 @@ builder.Services.AddSingleton<CommandPaletteService>();
 // nothing observable, it just makes the DI graph consistent.
 builder.Services.AddSingleton<CustomAuthStateProvider>();
 builder.Services.AddSingleton<AuthenticationStateProvider>(sp => sp.GetRequiredService<CustomAuthStateProvider>());
+builder.Services.AddSingleton<TokenRefresher>();
 builder.Services.AddSingleton<SilentRefreshScheduler>();
 builder.Services.AddAuthorizationCore();
 
@@ -37,17 +38,17 @@ builder.Services.AddTransient<AuthorizationMessageHandler>();
 
 var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? builder.HostEnvironment.BaseAddress;
 builder.Services
-    .AddHttpClient("CustomerManagerApi", client => client.BaseAddress = new Uri(apiBaseUrl))
+    .AddHttpClient(HttpClientNames.Api, client => client.BaseAddress = new Uri(apiBaseUrl))
     .AddHttpMessageHandler<AuthorizationMessageHandler>();
 
-// Same base address, but deliberately WITHOUT AuthorizationMessageHandler: used
-// only for the token-refresh call itself (SilentRefreshScheduler and
-// AuthorizationMessageHandler's own pre-emptive refresh), so refreshing a token
-// never recurses back into the handler that triggered the refresh.
-builder.Services.AddHttpClient("CustomerManagerApiRaw", client => client.BaseAddress = new Uri(apiBaseUrl));
+// Same base address, deliberately WITHOUT AuthorizationMessageHandler: used for
+// the auth endpoints (AuthApiService login/logout, TokenRefresher), so a 401 on
+// login isn't mistaken for an expired session and refreshing never recurses
+// back into the handler that triggered it.
+builder.Services.AddHttpClient(HttpClientNames.Raw, client => client.BaseAddress = new Uri(apiBaseUrl));
 
 // Every *ApiService gets the same named, authorization-handler-wrapped HttpClient.
-builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("CustomerManagerApi"));
+builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient(HttpClientNames.Api));
 
 builder.Services.AddScoped<IAuthApiService, AuthApiService>();
 builder.Services.AddScoped<ICustomerApiService, CustomerApiService>();

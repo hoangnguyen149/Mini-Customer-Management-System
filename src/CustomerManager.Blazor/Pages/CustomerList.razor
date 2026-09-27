@@ -65,16 +65,16 @@
 
 <MudHidden Breakpoint="Breakpoint.SmAndDown">
     <MudPaper Elevation="1" Class="pa-2">
-        <MudDataGrid T="CustomerListItemDto" ServerData="ServerReloadFunc" @ref="_grid" Filterable="false" SortMode="SortMode.Multiple"
+        <MudDataGrid T="CustomerListItemDto" ServerData="ServerReloadFunc" @ref="_grid" Filterable="false" SortMode="SortMode.Single"
                     Hover="true" Striped="true" FixedHeader="true" Height="calc(100vh - 340px)"
                     RowsPerPage="10" Dense="false" MultiSelection="true" @bind-SelectedItems="_selectedItems">
             <Columns>
                 <SelectColumn T="CustomerListItemDto" />
                 <PropertyColumn Property="x => x.CustomerCode" Title="Mã KH" />
                 <PropertyColumn Property="x => x.FullName" Title="Họ và tên" />
-                <PropertyColumn Property="x => x.Email" Title="Email" />
-                <PropertyColumn Property="x => x.PhoneNumber" Title="Số điện thoại" />
-                <PropertyColumn Property="x => x.DateOfBirth" Title="Ngày sinh" Format="dd/MM/yyyy" />
+                <PropertyColumn Property="x => x.Email" Title="Email" Sortable="false" />
+                <PropertyColumn Property="x => x.PhoneNumber" Title="Số điện thoại" Sortable="false" />
+                <PropertyColumn Property="x => x.DateOfBirth" Title="Ngày sinh" Format="dd/MM/yyyy" Sortable="false" />
                 <TemplateColumn Title="Trạng thái" Sortable="false">
                     <CellTemplate>
                         <MudChip T="string" Color="@(context.Item.IsActive ? Color.Success : Color.Default)" Size="Size.Small" Variant="Variant.Filled">
@@ -313,9 +313,9 @@
         }
     }
 
-    /// <summary>Backend has no bulk-delete endpoint, so this loops the existing
-    /// single DeleteAsync — same soft-delete/audit path as a normal delete, just
-    /// repeated. Reports partial failure instead of silently swallowing it.</summary>
+    /// <summary>One POST /api/customers/bulk-delete: every selected customer is
+    /// soft-deleted (and audited) in a single server-side transaction, instead
+    /// of one DELETE request per row.</summary>
     private async Task BulkDeleteAsync()
     {
         var count = _selectedItems.Count;
@@ -334,28 +334,21 @@
             return;
         }
 
-        var ids = _selectedItems.Select(x => x.Id).ToList();
-        var failures = 0;
-
-        foreach (var id in ids)
+        try
         {
-            try
-            {
-                await CustomerApiService.DeleteAsync(id);
-            }
-            catch (ApiException)
-            {
-                failures++;
-            }
+            var response = await CustomerApiService.BulkDeleteAsync(_selectedItems.Select(x => x.Id).ToList());
+            _selectedItems = new HashSet<CustomerListItemDto>();
+
+            Snackbar.Add(
+                response.NotFound.Count == 0
+                    ? $"Đã xóa {response.Deleted} khách hàng."
+                    : $"Đã xóa {response.Deleted} khách hàng. {response.NotFound.Count} khách hàng không còn tồn tại.",
+                response.NotFound.Count == 0 ? Severity.Success : Severity.Warning);
         }
-
-        _selectedItems = new HashSet<CustomerListItemDto>();
-
-        Snackbar.Add(
-            failures == 0
-                ? $"Đã xóa {ids.Count} khách hàng."
-                : $"Đã xóa {ids.Count - failures}/{ids.Count} khách hàng. {failures} thất bại.",
-            failures == 0 ? Severity.Success : Severity.Warning);
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
 
         await ReloadGridAsync();
     }
