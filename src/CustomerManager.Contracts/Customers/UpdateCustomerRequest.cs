@@ -1,6 +1,6 @@
 namespace CustomerManager.Contracts.Customers;
 
-public class UpdateCustomerRequest
+public class UpdateCustomerRequest : ICustomerWriteModel
 {
     public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;

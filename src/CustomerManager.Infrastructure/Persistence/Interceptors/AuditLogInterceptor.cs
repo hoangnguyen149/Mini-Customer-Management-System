@@ -36,10 +36,12 @@ public class AuditLogInterceptor : SaveChangesInterceptor
     };
 
     private readonly ICurrentUserService _currentUserService;
+    private readonly TimeProvider _timeProvider;
 
-    public AuditLogInterceptor(ICurrentUserService currentUserService)
+    public AuditLogInterceptor(ICurrentUserService currentUserService, TimeProvider timeProvider)
     {
         _currentUserService = currentUserService;
+        _timeProvider = timeProvider;
     }
 
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
@@ -65,10 +67,10 @@ public class AuditLogInterceptor : SaveChangesInterceptor
         }
 
         var username = _currentUserService.Username ?? "system";
-        var now = DateTime.UtcNow;
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
         List<AuditLog>? auditEntries = null;
 
-        foreach (var entry in context.ChangeTracker.Entries<Customer>())
+        foreach (var entry in context.ChangeTracker.Entries<Customer>().ToList())
         {
             var auditEntry = entry.State switch
             {
@@ -91,7 +93,11 @@ public class AuditLogInterceptor : SaveChangesInterceptor
 
     private static AuditLog BuildAddedEntry(EntityEntry<Customer> entry, string username, DateTime now)
     {
-        var values = entry.Properties.ToDictionary(p => p.Metadata.Name, p => p.CurrentValue);
+        // RowVersion is store-generated (still empty here) and IsDeleted is
+        // always false on insert — neither carries information for a reader.
+        var values = entry.Properties
+            .Where(p => p.Metadata.Name is not (nameof(Customer.RowVersion) or nameof(Customer.IsDeleted)))
+            .ToDictionary(p => p.Metadata.Name, p => p.CurrentValue);
 
         return AuditLog.Create(
             nameof(Customer),

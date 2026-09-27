@@ -1,6 +1,8 @@
+using CustomerManager.Application.Common;
 using CustomerManager.Application.Common.Exceptions;
 using CustomerManager.Application.Interfaces;
 using CustomerManager.Application.Mappings;
+using CustomerManager.Application.Validators;
 using CustomerManager.Contracts.Common;
 using CustomerManager.Contracts.Customers;
 using CustomerManager.Domain.Entities;
@@ -10,6 +12,8 @@ namespace CustomerManager.Application.Services;
 
 public class CustomerService : ICustomerService
 {
+    private const string ConcurrencyConflictMessage = "Dữ liệu khách hàng đã được người khác cập nhật. Vui lòng tải lại trang.";
+
     private readonly IApplicationDbContext _context;
     private readonly ICustomerCodeGenerator _customerCodeGenerator;
 
@@ -21,10 +25,8 @@ public class CustomerService : ICustomerService
 
     public async Task<PagedResult<CustomerListItemDto>> GetPagedAsync(CustomerQueryParameters query, CancellationToken ct)
     {
-        // AsNoTracking + Select-projection: this is a read-only query, never needs
-        // change tracking, and the projection means the DB only returns the
-        // columns CustomerListItemDto actually needs — not RowVersion/audit
-        // fields the grid never renders.
+        // AsNoTracking + Select-projection: read-only, and the DB only returns
+        // the columns CustomerListItemDto actually needs.
         var q = _context.Customers.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(query.FullName))
@@ -42,6 +44,7 @@ public class CustomerService : ICustomerService
             q = q.Where(c => c.IsActive == query.IsActive.Value);
         }
 
+        // Default (createdAt desc) is served by IX_Customers_CreatedAt_Active.
         q = (query.SortBy?.Trim().ToLowerInvariant(), query.SortDirection?.Trim().ToLowerInvariant()) switch
         {
             ("fullname", "asc") => q.OrderBy(c => c.FullName),
@@ -52,8 +55,6 @@ public class CustomerService : ICustomerService
             _ => q.OrderByDescending(c => c.CreatedAt)
         };
 
-        // Count + page are both executed at the database (IQueryable, deferred
-        // execution) — never ToList()-then-filter-in-memory.
         var totalCount = await q.CountAsync(ct);
 
         var items = await q
@@ -71,6 +72,21 @@ public class CustomerService : ICustomerService
         };
     }
 
+    public async Task<CustomerStatsDto> GetStatsAsync(CancellationToken ct)
+    {
+        // One GROUP BY round trip instead of three paged COUNT queries.
+        var counts = await _context.Customers
+            .AsNoTracking()
+            .GroupBy(c => c.IsActive)
+            .Select(g => new { IsActive = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var active = counts.FirstOrDefault(c => c.IsActive)?.Count ?? 0;
+        var inactive = counts.FirstOrDefault(c => !c.IsActive)?.Count ?? 0;
+
+        return new CustomerStatsDto { Total = active + inactive, Active = active, Inactive = inactive };
+    }
+
     public async Task<CustomerDetailDto?> GetByIdAsync(Guid id, CancellationToken ct)
     {
         var customer = await _context.Customers
@@ -83,18 +99,17 @@ public class CustomerService : ICustomerService
     public async Task<CustomerDetailDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct)
     {
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-        var emailExists = await _context.Customers.AnyAsync(c => c.Email == normalizedEmail, ct);
-        if (emailExists)
+        if (await _context.Customers.AnyAsync(c => c.Email == normalizedEmail, ct))
         {
-            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
+            throw EmailTaken(request.Email);
         }
 
-        // CustomerCode comes from a DB sequence (see ICustomerCodeGenerator /
-        // Issue M2), so two concurrent creates can never be handed the same
-        // code — no retry loop needed for that. The one remaining race is two
-        // concurrent requests using the same Email; the pre-check above closes
-        // most of that window, and the filtered unique index (Issue H2) is the
-        // real guard for what's left.
+        // CustomerCode comes from a DB sequence, so concurrent creates never
+        // share a code. The remaining race — two requests with the same new
+        // Email — is closed by the filtered unique index; only a violation of
+        // *that* index is reported as a duplicate email. Anything else
+        // (truncation, deadlock, a code collision after a bad sequence
+        // restart…) is a real server error and must surface as 500 + log.
         var code = await _customerCodeGenerator.NextAsync(ct);
         var customer = Customer.Create(code, request.FullName, request.Email, request.PhoneNumber, request.DateOfBirth, request.IsActive);
         _context.Customers.Add(customer);
@@ -103,14 +118,9 @@ public class CustomerService : ICustomerService
         {
             await _context.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (UniqueConstraintViolationException ex) when (ex.ConstraintName == DatabaseConstraintNames.CustomerEmailUnique)
         {
-            // The earlier retry loop here used to catch this broadly and retry
-            // with a new code, which (a) was solving the wrong problem — codes
-            // never collide anymore — and (b) left orphaned "Added" AuditLog rows
-            // behind on every retry (Issue M8). A DbUpdateException at this point
-            // can now only be the Email unique index rejecting a same-email race.
-            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
+            throw EmailTaken(request.Email);
         }
 
         return customer.ToDetailDto();
@@ -121,31 +131,25 @@ public class CustomerService : ICustomerService
         var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new NotFoundException(nameof(Customer), id);
 
-        byte[] clientRowVersion;
-        try
+        // Format is already enforced by UpdateCustomerRequestValidator (400);
+        // this guard only protects callers that bypass the validator.
+        if (!RowVersionFormat.TryDecode(request.RowVersion, out var clientRowVersion, requireSqlServerLength: false))
         {
-            clientRowVersion = Convert.FromBase64String(request.RowVersion);
-        }
-        catch (FormatException)
-        {
-            throw new ConflictException("RowVersion không hợp lệ.");
+            throw new FluentValidation.ValidationException("RowVersion không hợp lệ.");
         }
 
-        // Explicit early check: the entity was just loaded fresh from the DB, so
-        // if its RowVersion already differs from what the client last saw, someone
-        // else has modified it in between — fail fast with a clear message instead
-        // of waiting for SaveChanges to throw.
+        // Fail fast if the row changed since the client read it; the
+        // DbUpdateConcurrencyException catch below covers the remaining window
+        // between this check and SaveChanges.
         if (!customer.RowVersion.AsSpan().SequenceEqual(clientRowVersion))
         {
-            throw new ConflictException("Dữ liệu khách hàng đã được người khác cập nhật. Vui lòng tải lại trang.");
+            throw new ConflictException(ConcurrencyConflictMessage);
         }
 
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-        var emailTakenByAnother = await _context.Customers
-            .AnyAsync(c => c.Id != id && c.Email == normalizedEmail, ct);
-        if (emailTakenByAnother)
+        if (await _context.Customers.AnyAsync(c => c.Id != id && c.Email == normalizedEmail, ct))
         {
-            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
+            throw EmailTaken(request.Email);
         }
 
         customer.UpdateDetails(request.FullName, request.Email, request.PhoneNumber, request.DateOfBirth, request.IsActive);
@@ -156,39 +160,79 @@ public class CustomerService : ICustomerService
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Safety net for the race between the check above and this SaveChanges
-            // call — same conflict, same message, just caught at the DB level.
-            throw new ConflictException("Dữ liệu khách hàng đã được người khác cập nhật. Vui lòng tải lại trang.");
+            throw new ConflictException(ConcurrencyConflictMessage);
         }
-        catch (DbUpdateException)
+        catch (UniqueConstraintViolationException ex) when (ex.ConstraintName == DatabaseConstraintNames.CustomerEmailUnique)
         {
-            // DbUpdateConcurrencyException (above) is the RowVersion race;
-            // this is the Email race — two updates racing to the same new email
-            // used to surface as a raw 500 here instead of a 409 (Issue H2).
-            throw new ConflictException($"Email '{request.Email}' đã được sử dụng bởi khách hàng khác.");
+            throw EmailTaken(request.Email);
         }
 
         return customer.ToDetailDto();
     }
 
-    public async Task DeleteAsync(Guid id, CancellationToken ct)
+    public async Task DeleteAsync(Guid id, string? expectedRowVersion, CancellationToken ct)
     {
         var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new NotFoundException(nameof(Customer), id);
 
-        // Physically calling Remove here is intentional: the infrastructure-level
-        // SaveChanges interceptor intercepts the Deleted entity state and rewrites
-        // it into a Modified state that only sets IsDeleted = true. Application
-        // code never sets IsDeleted directly.
+        // Optional optimistic-concurrency check (If-Match header): callers that
+        // know which version they saw won't delete a row someone else has just
+        // edited. Callers without a version (e.g. bulk delete) keep the
+        // previous behavior.
+        if (expectedRowVersion is not null)
+        {
+            if (!RowVersionFormat.TryDecode(expectedRowVersion, out var expected, requireSqlServerLength: false))
+            {
+                throw new FluentValidation.ValidationException("RowVersion không hợp lệ.");
+            }
+
+            if (!customer.RowVersion.AsSpan().SequenceEqual(expected))
+            {
+                throw new ConflictException(ConcurrencyConflictMessage);
+            }
+        }
+
+        // Remove is intentional: SoftDeleteAndAuditInterceptor rewrites the
+        // Deleted state into an update of IsDeleted only.
         _context.Customers.Remove(customer);
+
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException(ConcurrencyConflictMessage);
+        }
+    }
+
+    public async Task<BulkDeleteResponse> DeleteManyAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        var distinctIds = ids.Distinct().ToList();
+
+        var customers = await _context.Customers
+            .Where(c => distinctIds.Contains(c.Id))
+            .ToListAsync(ct);
+
+        // One SaveChanges: every row is soft-deleted and audited in a single
+        // transaction instead of N separate HTTP calls from the UI.
+        _context.Customers.RemoveRange(customers);
         await _context.SaveChangesAsync(ct);
+
+        var found = customers.Select(c => c.Id).ToHashSet();
+        return new BulkDeleteResponse
+        {
+            Deleted = customers.Count,
+            NotFound = distinctIds.Where(id => !found.Contains(id)).ToList()
+        };
     }
 
     public async Task<IReadOnlyList<AuditLogDto>> GetAuditLogsAsync(Guid id, CancellationToken ct)
     {
+        var entityId = id.ToString();
         return await _context.AuditLogs
             .AsNoTracking()
-            .Where(a => a.EntityName == nameof(Customer) && a.EntityId == id.ToString())
+            .Where(a => a.EntityName == nameof(Customer) && a.EntityId == entityId)
             .OrderByDescending(a => a.Timestamp)
             .Select(a => new AuditLogDto
             {
@@ -200,4 +244,7 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
     }
+
+    private static ConflictException EmailTaken(string email) =>
+        new($"Email '{email}' đã được sử dụng bởi khách hàng khác.");
 }
