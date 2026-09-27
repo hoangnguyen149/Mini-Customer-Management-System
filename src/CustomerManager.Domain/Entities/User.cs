@@ -6,6 +6,13 @@ namespace CustomerManager.Domain.Entities;
 /// from configuration/User Secrets. See Phase 1 design doc section 5.1 for why this
 /// still satisfies the "hardcoded admin account" requirement without hardcoding the
 /// actual credentials in source.
+///
+/// Failed-login tracking / lockout deliberately does NOT live on this entity
+/// anymore. With exactly one well-known admin account, an account-wide lock is a
+/// denial-of-service lever: anyone who can reach /api/auth/login could keep the
+/// only admin locked out forever without ever guessing the password. Lockout is
+/// now tracked per (username, client IP) by ILoginAttemptTracker, so an attacker
+/// only ever locks out their own IP (see AuthService).
 /// </summary>
 public class User
 {
@@ -14,46 +21,31 @@ public class User
     public string PasswordHash { get; private set; } = string.Empty;
     public DateTime CreatedAt { get; private set; }
 
-    /// <summary>Consecutive failed login attempts since the last success. Reset
-    /// to 0 on a successful login. Drives account lockout — see RecordFailedLogin.</summary>
-    public int FailedLoginAttempts { get; private set; }
-
-    /// <summary>Set once FailedLoginAttempts crosses the configured threshold;
-    /// null when the account isn't currently locked out.</summary>
-    public DateTime? LockedOutUntil { get; private set; }
-
     private User()
     {
     }
 
-    public static User Create(string username, string passwordHash)
+    public static User Create(string username, string passwordHash, DateTime createdAtUtc)
     {
         return new User
         {
             Id = Guid.NewGuid(),
             Username = username.Trim(),
             PasswordHash = passwordHash,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = createdAtUtc
         };
     }
 
-    public bool IsLockedOut(DateTime now) => LockedOutUntil is not null && LockedOutUntil > now;
-
-    /// <summary>Called on every wrong-password attempt (never on unknown
-    /// username — there's no User row to update in that case). Locks the
-    /// account once <paramref name="maxAttempts"/> is reached.</summary>
-    public void RecordFailedLogin(int maxAttempts, TimeSpan lockoutDuration, DateTime now)
+    /// <summary>Used when the stored hash was produced with outdated hasher
+    /// parameters (PasswordVerificationResult.SuccessRehashNeeded) — the password
+    /// itself is unchanged, only its hash is upgraded.</summary>
+    public void UpgradePasswordHash(string newPasswordHash)
     {
-        FailedLoginAttempts++;
-        if (FailedLoginAttempts >= maxAttempts)
+        if (string.IsNullOrWhiteSpace(newPasswordHash))
         {
-            LockedOutUntil = now.Add(lockoutDuration);
+            throw new ArgumentException("Password hash must not be empty.", nameof(newPasswordHash));
         }
-    }
 
-    public void RecordSuccessfulLogin()
-    {
-        FailedLoginAttempts = 0;
-        LockedOutUntil = null;
+        PasswordHash = newPasswordHash;
     }
 }

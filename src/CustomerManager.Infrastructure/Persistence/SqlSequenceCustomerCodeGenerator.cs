@@ -1,17 +1,20 @@
+using System.Data;
+using CustomerManager.Application.Common;
 using CustomerManager.Application.Interfaces;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace CustomerManager.Infrastructure.Persistence;
 
 /// <summary>
-/// Formats "KH-{n:D4}" around the next value of the "dbo.CustomerCodeSequence"
-/// SQL Server sequence (see AppDbContext.OnModelCreating). NEXT VALUE FOR is
-/// atomic at the database level — unlike reading MAX(CustomerCode) in
-/// application code, two concurrent requests can never observe the same value.
+/// Formats "KH-{n:D6}" (see CustomerCodeFormat) around values of the
+/// "dbo.CustomerCodeSequence" SQL Server sequence. NEXT VALUE FOR /
+/// sp_sequence_get_range are atomic at the database level, so two concurrent
+/// requests can never observe the same value.
 /// </summary>
 public class SqlSequenceCustomerCodeGenerator : ICustomerCodeGenerator
 {
-    private const string Prefix = "KH-";
+    private const string SequenceName = "dbo.CustomerCodeSequence";
 
     private readonly AppDbContext _context;
 
@@ -22,18 +25,35 @@ public class SqlSequenceCustomerCodeGenerator : ICustomerCodeGenerator
 
     public async Task<string> NextAsync(CancellationToken ct)
     {
-        // SingleAsync()/FirstAsync() on a SqlQueryRaw result make EF Core wrap
-        // the raw SQL in a derived-table subquery (to apply its own TOP(n)
-        // cardinality check) — and SQL Server explicitly rejects "NEXT VALUE
-        // FOR" inside a subquery/derived table ("not allowed in ... derived
-        // tables"), so this only ever worked against unit tests (which fake
-        // this generator entirely) and silently 500'd against a real SQL
-        // Server. ToListAsync() executes the raw SQL as-is with no wrapper;
-        // the single row is then read in-memory.
+        // ToListAsync (not SingleAsync): EF wraps SingleAsync/FirstAsync raw SQL
+        // in a derived table, and SQL Server rejects NEXT VALUE FOR there.
         var values = await _context.Database
-            .SqlQueryRaw<int>("SELECT NEXT VALUE FOR dbo.CustomerCodeSequence AS Value")
+            .SqlQueryRaw<long>($"SELECT CAST(NEXT VALUE FOR {SequenceName} AS BIGINT) AS Value")
             .ToListAsync(ct);
 
-        return $"{Prefix}{values.Single():D4}";
+        return CustomerCodeFormat.Format(values.Single());
+    }
+
+    public async Task<IReadOnlyList<string>> NextRangeAsync(int count, CancellationToken ct)
+    {
+        if (count <= 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        // Reserves `count` consecutive values in one round trip (bulk import)
+        // instead of one NEXT VALUE FOR per row.
+        var firstValue = new SqlParameter("@first", SqlDbType.Variant) { Direction = ParameterDirection.Output };
+        var rangeSize = new SqlParameter("@size", SqlDbType.BigInt) { Value = (long)count };
+
+        await _context.Database.ExecuteSqlRawAsync(
+            $"EXEC sys.sp_sequence_get_range @sequence_name = N'{SequenceName}', @range_size = @size, @range_first_value = @first OUTPUT",
+            new object[] { rangeSize, firstValue },
+            ct);
+
+        var start = Convert.ToInt64(firstValue.Value);
+        return Enumerable.Range(0, count)
+            .Select(i => CustomerCodeFormat.Format(start + i))
+            .ToList();
     }
 }
