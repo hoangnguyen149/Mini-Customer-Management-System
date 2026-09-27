@@ -1,43 +1,33 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using CustomerManager.Application.Common.Options;
 using CustomerManager.Application.Interfaces;
 using CustomerManager.Domain.Entities;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace CustomerManager.Infrastructure.Authentication;
 
 public class JwtTokenGenerator : IJwtTokenGenerator
 {
-    private readonly IConfiguration _configuration;
+    private readonly JwtOptions _options;
+    private readonly TimeProvider _timeProvider;
 
-    public JwtTokenGenerator(IConfiguration configuration)
+    /// <summary>JwtOptions is validated at startup (secret length etc., see
+    /// Program.cs), so no re-validation is needed per token.</summary>
+    public JwtTokenGenerator(IOptions<JwtOptions> options, TimeProvider timeProvider)
     {
-        _configuration = configuration;
+        _options = options.Value;
+        _timeProvider = timeProvider;
     }
 
     public (string Token, DateTime ExpiresAtUtc) GenerateToken(User user)
     {
-        var jwtSection = _configuration.GetSection("Jwt");
-
-        // Secret comes from User Secrets (dev) / environment variable or a secret
-        // store (prod) — see appsettings.json, which only carries the *names* of
-        // the keys, never a real value. Fails fast with a clear message instead
-        // of silently signing with an empty/weak key.
-        var secret = jwtSection["Secret"];
-        if (string.IsNullOrWhiteSpace(secret) || secret.Length < 32)
-        {
-            throw new InvalidOperationException(
-                "Jwt:Secret is missing or too short (min 32 chars / 256 bits). Set it via User Secrets or an environment variable — see README.md.");
-        }
-
-        var issuer = jwtSection["Issuer"] ?? "CustomerManager";
-        var audience = jwtSection["Audience"] ?? "CustomerManager.Client";
-        // Short-lived by design (10-15 min default) — the refresh token (see
-        // AuthService) is what keeps a session alive, not a long-lived JWT that
-        // can't be revoked before it expires on its own.
-        var expiryMinutes = int.TryParse(jwtSection["ExpiryMinutes"], out var minutes) ? minutes : 15;
+        // Short-lived by design — the refresh token is what keeps a session
+        // alive, not a long-lived JWT that can't be revoked before expiry.
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var expiresAtUtc = now.AddMinutes(_options.ExpiryMinutes);
 
         var claims = new[]
         {
@@ -46,18 +36,17 @@ public class JwtTokenGenerator : IJwtTokenGenerator
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Secret));
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
-        var expiresAtUtc = DateTime.UtcNow.AddMinutes(expiryMinutes);
 
         var token = new JwtSecurityToken(
-            issuer: issuer,
-            audience: audience,
+            issuer: _options.Issuer,
+            audience: _options.Audience,
             claims: claims,
+            notBefore: now,
             expires: expiresAtUtc,
             signingCredentials: credentials);
 
-        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-        return (tokenString, expiresAtUtc);
+        return (new JwtSecurityTokenHandler().WriteToken(token), expiresAtUtc);
     }
 }

@@ -7,6 +7,7 @@ using CustomerManager.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CustomerManager.Infrastructure;
 
@@ -14,6 +15,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
+        services.TryAddSingleton(TimeProvider.System);
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
 
@@ -43,6 +45,10 @@ public static class DependencyInjection
 
         services.AddScoped<IPasswordHasherService, PasswordHasherService>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+
+        // Singleton: holds the per-(username, IP) failure counters for the
+        // lifetime of the process (backed by IMemoryCache, registered below).
+        services.AddSingleton<ILoginAttemptTracker, MemoryLoginAttemptTracker>();
 
         // Runs once at startup — see AdminUserSeeder for why this replaces both a
         // Users-management UI and a migration-based seed.
