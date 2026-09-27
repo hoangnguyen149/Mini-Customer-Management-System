@@ -25,7 +25,7 @@ public class CustomerServiceTests
 
         var result = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
-        result.CustomerCode.Should().Be("KH-0001");
+        result.CustomerCode.Should().Be("KH-000001");
         result.FullName.Should().Be("Nguyễn Văn A");
         result.Email.Should().Be("nguyen.van.a@example.com");
         result.IsActive.Should().BeTrue();
@@ -41,7 +41,7 @@ public class CustomerServiceTests
         await sut.CreateAsync(ValidCreateRequest("first@example.com"), CancellationToken.None);
         var second = await sut.CreateAsync(ValidCreateRequest("second@example.com"), CancellationToken.None);
 
-        second.CustomerCode.Should().Be("KH-0002");
+        second.CustomerCode.Should().Be("KH-000002");
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class CustomerServiceTests
         var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
-        await sut.DeleteAsync(created.Id, CancellationToken.None);
+        await sut.DeleteAsync(created.Id, null, CancellationToken.None);
         var result = await sut.GetByIdAsync(created.Id, CancellationToken.None);
 
         result.Should().BeNull();
@@ -101,7 +101,7 @@ public class CustomerServiceTests
         await using var context = TestDbContextFactory.Create();
         var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
 
-        var act = () => sut.DeleteAsync(Guid.NewGuid(), CancellationToken.None);
+        var act = () => sut.DeleteAsync(Guid.NewGuid(), null, CancellationToken.None);
 
         await act.Should().ThrowAsync<NotFoundException>();
     }
@@ -171,5 +171,55 @@ public class CustomerServiceTests
 
         result.TotalCount.Should().Be(1);
         result.Items.Single().FullName.Should().Be("Trần Thị B");
+    }
+
+    [Fact]
+    public async Task GetStatsAsync_ShouldCountActiveAndInactive_ExcludingDeleted()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
+        await sut.CreateAsync(ValidCreateRequest("s1@example.com"), CancellationToken.None);
+        var inactive = ValidCreateRequest("s2@example.com");
+        inactive.IsActive = false;
+        await sut.CreateAsync(inactive, CancellationToken.None);
+        var deleted = await sut.CreateAsync(ValidCreateRequest("s3@example.com"), CancellationToken.None);
+        await sut.DeleteAsync(deleted.Id, null, CancellationToken.None);
+
+        var stats = await sut.GetStatsAsync(CancellationToken.None);
+
+        stats.Total.Should().Be(2);
+        stats.Active.Should().Be(1);
+        stats.Inactive.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DeleteManyAsync_ShouldSoftDeleteFound_AndReportMissing()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
+        var a = await sut.CreateAsync(ValidCreateRequest("b1@example.com"), CancellationToken.None);
+        var b = await sut.CreateAsync(ValidCreateRequest("b2@example.com"), CancellationToken.None);
+        var missing = Guid.NewGuid();
+
+        var result = await sut.DeleteManyAsync(new[] { a.Id, b.Id, missing }, CancellationToken.None);
+
+        result.Deleted.Should().Be(2);
+        result.NotFound.Should().Equal(missing);
+        (await sut.GetByIdAsync(a.Id, CancellationToken.None)).Should().BeNull();
+        context.AuditLogs.Count(l => l.Action == "Deleted").Should().Be(2);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldThrowConflict_WhenIfMatchRowVersionIsStale()
+    {
+        await using var context = TestDbContextFactory.Create();
+        var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
+        var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+        var stale = Convert.ToBase64String(new byte[] { 9, 9, 9, 9, 9, 9, 9, 9 });
+
+        var act = () => sut.DeleteAsync(created.Id, stale, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ConflictException>();
+        (await sut.GetByIdAsync(created.Id, CancellationToken.None)).Should().NotBeNull();
     }
 }

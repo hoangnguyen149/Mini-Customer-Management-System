@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore CustomerManager.sln
+
+      - name: Build
+        run: dotnet build CustomerManager.sln --no-restore --configuration Release
+
+      - name: Unit tests
+        run: >
+          dotnet test tests/CustomerManager.UnitTests
+          --no-build --configuration Release
+          --logger "trx;LogFileName=unit.trx"
+
+      # Starts SQL Server in Docker via Testcontainers (Docker is preinstalled
+      # on ubuntu-latest runners).
+      - name: Integration tests
+        run: >
+          dotnet test tests/CustomerManager.IntegrationTests
+          --no-build --configuration Release
+          --logger "trx;LogFileName=integration.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'

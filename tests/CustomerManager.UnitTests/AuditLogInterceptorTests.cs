@@ -71,10 +71,16 @@ public class AuditLogInterceptorTests
         var sut = new CustomerService(context, new FakeCustomerCodeGenerator());
         var created = await sut.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
-        await sut.DeleteAsync(created.Id, CancellationToken.None);
+        await sut.DeleteAsync(created.Id, null, CancellationToken.None);
         var logs = await sut.GetAuditLogsAsync(created.Id, CancellationToken.None);
 
-        logs.Should().Contain(l => l.Action == "Deleted" && l.UserName == "deleter");
+        var deleted = logs.Should().ContainSingle(l => l.Action == "Deleted" && l.UserName == "deleter").Subject;
+
+        // Only what the soft delete actually changed. Previously the interceptor
+        // set State = Modified, which marked every column modified and recorded
+        // FullName/Email/Phone/... as "changed" in this entry.
+        var changed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(deleted.NewValues!)!;
+        changed.Keys.Should().BeEquivalentTo("IsDeleted", "UpdatedAt", "UpdatedBy");
     }
 
     [Fact]
